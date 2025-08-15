@@ -5,7 +5,7 @@
 ## 文件说明
 
 - `node-example.js` - Node.js 环境示例
-- `browser-example.html` - 浏览器环境示例
+
 - `interactive-test.html` - 交互式测试页面
 
 ## 使用方法

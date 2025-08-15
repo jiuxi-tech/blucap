@@ -53,7 +53,7 @@ node examples/node-example.js
 
 # 5. 启动本地服务器测试浏览器示例
 npx http-server . -p 8080
-# 然后访问 http://localhost:8080/examples/browser-example.html
+# 然后访问 http://localhost:8080/examples/interactive-test.html
 ```
 
 ### 2. 获取 GraphHopper API 密钥
@@ -531,7 +531,7 @@ node examples/node-example.js
 npx http-server . -p 8080
 
 # 访问不同的示例页面：
-# http://localhost:8080/examples/browser-example.html      # 基础示例
+
 # http://localhost:8080/examples/interactive-test.html    # 交互式测试（包含地图）
 ```
 
@@ -548,7 +548,6 @@ blucap/
 │   └── blucap.min.js.map
 ├── examples/                   # 示例文件
 │   ├── node-example.js         # Node.js 示例
-│   ├── browser-example.html    # 浏览器基础示例
 │   └── interactive-test.html   # 交互式测试页面
 ├── scripts/                    # 构建脚本
 │   ├── build.js               # 自动化构建
