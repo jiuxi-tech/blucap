@@ -56,6 +56,30 @@ npx http-server . -p 8080
 # 然后访问 http://localhost:8080/examples/interactive-test.html
 ```
 
+#### Vercel 部署
+
+项目支持一键部署到 Vercel：
+
+[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https://github.com/jiuxi-ai/blucap)
+
+或者手动部署：
+
+```bash
+# 1. 安装 Vercel CLI
+npm i -g vercel
+
+# 2. 登录 Vercel
+vercel login
+
+# 3. 部署预览版本
+npm run deploy:preview
+
+# 4. 部署生产版本
+npm run deploy
+```
+
+部署后，您可以直接访问在线演示页面。
+
 ### 2. 获取 GraphHopper API 密钥
 
 在使用本库之前，您需要获取免费的 GraphHopper API 密钥：

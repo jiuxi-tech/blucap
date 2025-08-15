@@ -48,6 +48,9 @@
     "publish:public": "node scripts/publish.js --access=public",
     "prepublishOnly": "npm run build:all",
     "version": "npm run build:all && git add dist/",
+    "vercel-build": "npm run build:all",
+    "deploy": "vercel --prod",
+    "deploy:preview": "vercel",
     "postversion": "git push && git push --tags"
   },
   "files": [
