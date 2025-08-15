@@ -1,0 +1,747 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Blucap - 交互式测试</title>
+    
+    <!-- Leaflet CSS -->
+    <link rel="stylesheet" href="../css/leaflet.css" />
+    
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #333;
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        .section {
+            margin-bottom: 30px;
+            padding: 20px;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            background-color: #fafafa;
+        }
+        .section h2 {
+            color: #555;
+            margin-top: 0;
+        }
+        .form-group {
+            margin-bottom: 15px;
+        }
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+            color: #333;
+        }
+        input, select {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 14px;
+        }
+        button {
+            background-color: #007bff;
+            color: white;
+            padding: 12px 24px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+            margin-right: 10px;
+            margin-bottom: 10px;
+        }
+        button:hover {
+            background-color: #0056b3;
+        }
+        button:disabled {
+            background-color: #6c757d;
+            cursor: not-allowed;
+        }
+        .result {
+            margin-top: 20px;
+            padding: 15px;
+            border-radius: 4px;
+            white-space: pre-wrap;
+            font-family: monospace;
+            font-size: 12px;
+            max-height: 400px;
+            overflow-y: auto;
+        }
+        .success {
+            background-color: #d4edda;
+            border: 1px solid #c3e6cb;
+            color: #155724;
+        }
+        .error {
+            background-color: #f8d7da;
+            border: 1px solid #f5c6cb;
+            color: #721c24;
+        }
+        .info {
+            background-color: #d1ecf1;
+            border: 1px solid #bee5eb;
+            color: #0c5460;
+        }
+        .loading {
+            color: #856404;
+            background-color: #fff3cd;
+            border: 1px solid #ffeaa7;
+        }
+        .coordinates {
+            display: flex;
+            gap: 10px;
+        }
+        .coordinates input {
+            flex: 1;
+        }
+        
+        /* 地图样式 */
+        #map {
+            height: 600px;
+            width: 100%;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            margin-top: 20px;
+        }
+        
+        .map-section {
+            margin-top: 30px;
+        }
+        
+        .map-controls {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 15px;
+            flex-wrap: wrap;
+        }
+        
+        .map-controls button {
+            margin: 0;
+        }
+        
+        .route-info {
+            background-color: #e9ecef;
+            padding: 15px;
+            border-radius: 8px;
+            margin-top: 15px;
+            font-family: monospace;
+            font-size: 14px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🚗 Blucap 交互式测试</h1>
+        
+        <!-- API 配置 -->
+        <div class="section">
+            <h2>API 配置</h2>
+            <div class="form-group">
+                <label for="apiKey">GraphHopper API Key:</label>
+                <input type="text" id="apiKey" placeholder="输入你的 GraphHopper API Key">
+            </div>
+            <button onclick="setApiKey()">设置 API Key</button>
+        </div>
+        
+        <!-- 环形路线测试 -->
+        <div class="section">
+            <h2>环形路线测试</h2>
+            <div class="form-group">
+                <label>起始点坐标 (纬度, 经度):</label>
+                <div class="coordinates">
+                    <input type="number" id="roundTripLat" placeholder="纬度" value="39.9042" step="any">
+                    <input type="number" id="roundTripLng" placeholder="经度" value="116.4074" step="any">
+                </div>
+            </div>
+            <div class="form-group">
+                <label for="roundTripDistance">目标距离 (公里):</label>
+                <input type="number" id="roundTripDistance" value="100" min="50" max="500">
+            </div>
+            <div class="form-group">
+                <label for="roundTripCurve">弯道等级:</label>
+                <select id="roundTripCurve">
+                    <option value="low">低 (较少弯道)</option>
+                    <option value="medium" selected>中 (适中弯道)</option>
+                    <option value="high">高 (更多弯道)</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label for="startBearing">起始方向 (度, 0-360):</label>
+                <input type="number" id="startBearing" value="0" min="0" max="360">
+            </div>
+            <button onclick="testRoundTrip()">生成环形路线</button>
+            <button onclick="testRoundTripNew()">测试新API (generateFunRoute)</button>
+            <div id="roundTripResult" class="result" style="display: none;"></div>
+        </div>
+        
+        <!-- 点对点路线测试 -->
+        <div class="section">
+            <h2>点对点路线测试</h2>
+            <div class="form-group">
+                <label>起始点坐标 (纬度, 经度):</label>
+                <div class="coordinates">
+                    <input type="number" id="p2pStartLat" placeholder="起始纬度" value="39.9042" step="any">
+                    <input type="number" id="p2pStartLng" placeholder="起始经度" value="116.4074" step="any">
+                </div>
+            </div>
+            <div class="form-group">
+                <label>终点坐标 (纬度, 经度):</label>
+                <div class="coordinates">
+                    <input type="number" id="p2pEndLat" placeholder="终点纬度" value="39.9142" step="any">
+                    <input type="number" id="p2pEndLng" placeholder="终点经度" value="116.4174" step="any">
+                </div>
+            </div>
+            <div class="form-group">
+                <label for="p2pDistance">目标距离 (公里):</label>
+                <input type="number" id="p2pDistance" value="80" min="50" max="500">
+            </div>
+            <div class="form-group">
+                <label for="p2pCurve">弯道等级:</label>
+                <select id="p2pCurve">
+                    <option value="low">低 (较少弯道)</option>
+                    <option value="medium" selected>中 (适中弯道)</option>
+                    <option value="high">高 (更多弯道)</option>
+                </select>
+            </div>
+            <button onclick="testPointToPoint()">生成点对点路线</button>
+            <div id="p2pResult" class="result" style="display: none;"></div>
+        </div>
+        
+        <!-- 库状态检查 -->
+        <div class="section">
+            <h2>库状态检查</h2>
+            <button onclick="checkLibraryStatus()">检查库状态</button>
+            <div id="statusResult" class="result" style="display: none;"></div>
+        </div>
+        
+        <!-- 地图显示 -->
+        <div class="section map-section">
+            <h2>🗺️ 交互式地图</h2>
+            <p>在地图上点击设置起点和终点，然后生成趣味路线查看实际效果</p>
+            
+            <div class="map-controls">
+                <div class="form-group" style="margin-bottom: 0; min-width: 150px;">
+                    <label for="mapRouteType" style="margin-bottom: 5px;">路线类型:</label>
+                    <select id="mapRouteType" style="width: 100%;">
+                        <option value="roundtrip">环形路线</option>
+                        <option value="point_to_point">点对点路线</option>
+                    </select>
+                </div>
+                
+                <div class="form-group" style="margin-bottom: 0; min-width: 120px;">
+                    <label for="mapDistance" style="margin-bottom: 5px;">距离 (km):</label>
+                    <input type="number" id="mapDistance" value="100" min="50" max="500" style="width: 100%;">
+                </div>
+                
+                <div class="form-group" style="margin-bottom: 0; min-width: 120px;">
+                    <label for="mapCurveLevel" style="margin-bottom: 5px;">弯道等级:</label>
+                    <select id="mapCurveLevel" style="width: 100%;">
+                        <option value="low">低</option>
+                        <option value="medium" selected>中</option>
+                        <option value="high">高</option>
+                    </select>
+                </div>
+                
+                <div style="display: flex; align-items: end; gap: 10px;">
+                    <button onclick="generateMapRoute()">生成路线</button>
+                    <button onclick="clearMap()" style="background-color: #dc3545;">清除地图</button>
+                </div>
+            </div>
+            
+            <div id="map"></div>
+            
+            <div id="routeInfo" class="route-info" style="display: none;"></div>
+        </div>
+    </div>
+    
+    <!-- 加载依赖库 -->
+    <script src="../js/jquery-3.2.1.min.js"></script>
+    <script src="../js/leaflet.js"></script>
+    
+    <!-- 加载库文件 -->
+    <script>
+        // 动态加载库文件以避免缓存
+        const script = document.createElement('script');
+        script.src = '../blucap.js';
+        document.head.appendChild(script);
+    </script>
+    
+    <script>
+        let funRouteGenerator = null;
+        let map = null;
+        let startMarker = null;
+        let endMarker = null;
+        let routeLayer = null;
+        let markersLayer = null;
+        
+        // 图标配置
+        const iconObject = L.icon({
+            iconUrl: '../img/marker-icon.png',
+            shadowSize: [50, 64],
+            shadowAnchor: [4, 62],
+            iconAnchor: [12, 40]
+        });
+        
+        const endIconObject = L.icon({
+            iconUrl: '../img/marker-icon-red.png',
+            shadowSize: [50, 64],
+            shadowAnchor: [4, 62],
+            iconAnchor: [12, 40]
+        });
+        
+        // 页面加载完成后的初始化
+        window.addEventListener('load', function() {
+            console.log('页面完全加载完成');
+            initializeMap();
+            checkLibraryStatus();
+        });
+        
+        function initializeMap() {
+            // 创建地图
+            const osmAttr = '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors';
+            const osm = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                attribution: osmAttr
+            });
+            
+            map = L.map('map', {layers: [osm]});
+            map.setView([39.9042, 116.4074], 12); // 北京天安门
+            
+            L.control.layers({
+                "OpenStreetMap": osm
+            }).addTo(map);
+            
+            // 创建标记图层
+            markersLayer = L.layerGroup().addTo(map);
+            
+            // 地图点击事件
+            map.on('click', function(e) {
+                const routeType = document.getElementById('mapRouteType').value;
+                
+                if (routeType === 'roundtrip') {
+                    // 环形路线只需要一个起点
+                    markersLayer.clearLayers();
+                    startMarker = L.marker([e.latlng.lat, e.latlng.lng], {icon: iconObject}).addTo(markersLayer);
+                    startMarker.bindPopup('起点').openPopup();
+                    endMarker = null;
+                } else {
+                    // 点对点路线需要两个点
+                    if (!startMarker) {
+                        startMarker = L.marker([e.latlng.lat, e.latlng.lng], {icon: iconObject}).addTo(markersLayer);
+                        startMarker.bindPopup('起点').openPopup();
+                    } else if (!endMarker) {
+                        endMarker = L.marker([e.latlng.lat, e.latlng.lng], {icon: endIconObject}).addTo(markersLayer);
+                        endMarker.bindPopup('终点').openPopup();
+                    } else {
+                        // 重新开始
+                        markersLayer.clearLayers();
+                        startMarker = L.marker([e.latlng.lat, e.latlng.lng], {icon: iconObject}).addTo(markersLayer);
+                        startMarker.bindPopup('起点').openPopup();
+                        endMarker = null;
+                    }
+                }
+            });
+            
+            // 路线类型切换事件
+            document.getElementById('mapRouteType').addEventListener('change', function() {
+                clearMap();
+            });
+        }
+        
+        function setApiKey() {
+            const apiKey = document.getElementById('apiKey').value.trim();
+            if (!apiKey) {
+                showResult('statusResult', '请输入有效的 API Key', 'error');
+                return;
+            }
+            
+            try {
+                funRouteGenerator = new Blucap({
+                    apiKey: apiKey,
+                    profile: 'car' // 设置为汽车配置（API 支持的类型）
+                });
+                showResult('statusResult', `API 密钥设置成功: ${apiKey.substring(0, 10)}...`, 'success');
+            } catch (error) {
+                showResult('statusResult', `设置 API 密钥失败: ${error.message}`, 'error');
+            }
+        }
+        
+        function checkLibraryStatus() {
+            console.log('=== 库加载检查 ===');
+            console.log('检查时间:', new Date().toLocaleString());
+            
+            let status = [];
+            
+            // 检查全局对象
+            if (typeof FunRouteGenerator !== 'undefined') {
+                status.push('✅ FunRouteGenerator 类已加载');
+                status.push(`   类型: ${typeof FunRouteGenerator}`);
+                
+                // 检查实例方法
+                const instance = new FunRouteGenerator({ apiKey: 'test' });
+                const methods = ['generateFunRoute', 'generateRoundTrip', '_generateRoundTrip', '_generatePointToPoint'];
+                methods.forEach(method => {
+                    if (typeof instance[method] === 'function') {
+                        status.push(`   ✅ ${method} 方法可用`);
+                    } else {
+                        status.push(`   ❌ ${method} 方法缺失`);
+                    }
+                });
+            } else {
+                status.push('❌ FunRouteGenerator 类未加载');
+            }
+            
+            showResult('statusResult', status.join('\n'), 'info');
+        }
+        
+        async function testRoundTrip() {
+            if (!funRouteGenerator) {
+                showResult('roundTripResult', '请先设置 API Key', 'error');
+                return;
+            }
+            
+            const lat = parseFloat(document.getElementById('roundTripLat').value);
+            const lng = parseFloat(document.getElementById('roundTripLng').value);
+            const distance = parseInt(document.getElementById('roundTripDistance').value);
+            const curveLevel = document.getElementById('roundTripCurve').value;
+            const startBearing = parseInt(document.getElementById('startBearing').value);
+            
+            if (isNaN(lat) || isNaN(lng) || isNaN(distance)) {
+                showResult('roundTripResult', '请输入有效的坐标和距离', 'error');
+                return;
+            }
+            
+            showResult('roundTripResult', '正在生成环形路线...', 'loading');
+            
+            try {
+                console.log('开始生成环形路线...');
+                console.log('参数:', { startPoint: [lat, lng], distance, curveLevel, startBearing });
+                
+                const result = await funRouteGenerator.generateRoundTrip({
+                    startPoint: [lat, lng],
+                    distance: distance,
+                    curveLevel: curveLevel,
+                    startBearing: startBearing
+                });
+                
+                console.log('环形路线生成成功:', result);
+                
+                let output = '🎉 环形路线生成成功!\n\n';
+                if (result.route_info) {
+                    output += `路线信息:\n`;
+                    output += `- 类型: ${result.route_info.type}\n`;
+                    output += `- 目标距离: ${(result.route_info.target_distance/1000).toFixed(1)} km\n`;
+                    output += `- 实际距离: ${(result.route_info.actual_distance/1000).toFixed(1)} km\n`;
+                    output += `- 弯道等级: ${result.route_info.curve_level}\n`;
+                    output += `- 起始方向: ${result.route_info.start_bearing}°\n\n`;
+                }
+                
+                if (result.paths && result.paths.length > 0) {
+                    const path = result.paths[0];
+                    output += `路径详情:\n`;
+                    output += `- 距离: ${(path.distance/1000).toFixed(2)} km\n`;
+                    output += `- 时间: ${Math.round(path.time/60000)} 分钟\n`;
+                    if (path.points && path.points.coordinates) {
+                        output += `- 路径点数: ${path.points.coordinates.length}\n`;
+                    }
+                }
+                
+                showResult('roundTripResult', output, 'success');
+            } catch (error) {
+                console.error('环形路线生成错误:', error);
+                showResult('roundTripResult', `❌ 生成失败: ${error.message}`, 'error');
+            }
+        }
+        
+        async function testRoundTripNew() {
+            if (!funRouteGenerator) {
+                showResult('roundTripResult', '请先设置 API Key', 'error');
+                return;
+            }
+            
+            const lat = parseFloat(document.getElementById('roundTripLat').value);
+            const lng = parseFloat(document.getElementById('roundTripLng').value);
+            const distance = parseInt(document.getElementById('roundTripDistance').value);
+            const curveLevel = document.getElementById('roundTripCurve').value;
+            const startBearing = parseInt(document.getElementById('startBearing').value);
+            
+            if (isNaN(lat) || isNaN(lng) || isNaN(distance)) {
+                showResult('roundTripResult', '请输入有效的坐标和距离', 'error');
+                return;
+            }
+            
+            showResult('roundTripResult', '正在使用新API生成环形路线...', 'loading');
+            
+            try {
+                console.log('开始使用新API生成环形路线...');
+                
+                const result = await funRouteGenerator.generateFunRoute({
+                    start_point: [lng, lat], // 注意：新API使用 [lng, lat] 格式
+                    target_distance: distance * 1000, // 转换为米
+                    curve_level: curveLevel,
+                    route_type: "roundtrip",
+                    start_bearing: startBearing
+                });
+                
+                console.log('新API环形路线生成成功:', result);
+                
+                let output = '🎉 新API环形路线生成成功!\n\n';
+                if (result.route_info) {
+                    output += `路线信息:\n`;
+                    output += `- 类型: ${result.route_info.type}\n`;
+                    output += `- 目标距离: ${(result.route_info.target_distance/1000).toFixed(1)} km\n`;
+                    output += `- 实际距离: ${(result.route_info.actual_distance/1000).toFixed(1)} km\n`;
+                    output += `- 弯道等级: ${result.route_info.curve_level}\n`;
+                    output += `- 起始方向: ${result.route_info.start_bearing}°\n\n`;
+                }
+                
+                if (result.paths && result.paths.length > 0) {
+                    const path = result.paths[0];
+                    output += `路径详情:\n`;
+                    output += `- 距离: ${(path.distance/1000).toFixed(2)} km\n`;
+                    output += `- 时间: ${Math.round(path.time/60000)} 分钟\n`;
+                    if (path.points && path.points.coordinates) {
+                        output += `- 路径点数: ${path.points.coordinates.length}\n`;
+                    }
+                }
+                
+                showResult('roundTripResult', output, 'success');
+            } catch (error) {
+                console.error('新API环形路线生成错误:', error);
+                showResult('roundTripResult', `❌ 新API生成失败: ${error.message}`, 'error');
+            }
+        }
+        
+        async function testPointToPoint() {
+            if (!funRouteGenerator) {
+                showResult('p2pResult', '请先设置 API Key', 'error');
+                return;
+            }
+            
+            const startLat = parseFloat(document.getElementById('p2pStartLat').value);
+            const startLng = parseFloat(document.getElementById('p2pStartLng').value);
+            const endLat = parseFloat(document.getElementById('p2pEndLat').value);
+            const endLng = parseFloat(document.getElementById('p2pEndLng').value);
+            const distance = parseInt(document.getElementById('p2pDistance').value);
+            const curveLevel = document.getElementById('p2pCurve').value;
+            
+            if (isNaN(startLat) || isNaN(startLng) || isNaN(endLat) || isNaN(endLng) || isNaN(distance)) {
+                showResult('p2pResult', '请输入有效的坐标和距离', 'error');
+                return;
+            }
+            
+            showResult('p2pResult', '正在生成点对点路线...', 'loading');
+            
+            try {
+                console.log('开始生成点对点路线...');
+                
+                const result = await funRouteGenerator.generateFunRoute({
+                    start_point: [startLng, startLat], // [lng, lat] 格式
+                    end_point: [endLng, endLat], // [lng, lat] 格式
+                    target_distance: distance * 1000, // 转换为米
+                    curve_level: curveLevel,
+                    route_type: "point_to_point"
+                });
+                
+                console.log('点对点路线生成成功:', result);
+                
+                let output = '🎉 点对点路线生成成功!\n\n';
+                if (result.route_info) {
+                    output += `路线信息:\n`;
+                    output += `- 类型: ${result.route_info.type}\n`;
+                    output += `- 目标距离: ${(result.route_info.target_distance/1000).toFixed(1)} km\n`;
+                    output += `- 实际距离: ${(result.route_info.actual_distance/1000).toFixed(1)} km\n`;
+                    output += `- 直线距离: ${(result.route_info.direct_distance/1000).toFixed(1)} km\n`;
+                    output += `- 弯道等级: ${result.route_info.curve_level}\n\n`;
+                }
+                
+                if (result.paths && result.paths.length > 0) {
+                    const path = result.paths[0];
+                    output += `路径详情:\n`;
+                    output += `- 距离: ${(path.distance/1000).toFixed(2)} km\n`;
+                    output += `- 时间: ${Math.round(path.time/60000)} 分钟\n`;
+                    if (path.points && path.points.coordinates) {
+                        output += `- 路径点数: ${path.points.coordinates.length}\n`;
+                    }
+                }
+                
+                showResult('p2pResult', output, 'success');
+            } catch (error) {
+                console.error('点对点路线生成错误:', error);
+                showResult('p2pResult', `❌ 生成失败: ${error.message}`, 'error');
+            }
+        }
+        
+        function showResult(elementId, message, type) {
+            const element = document.getElementById(elementId);
+            element.textContent = message;
+            element.className = `result ${type}`;
+            element.style.display = 'block';
+        }
+        
+        // 地图相关功能函数
+        async function generateMapRoute() {
+            if (!funRouteGenerator) {
+                alert('请先设置 API Key');
+                return;
+            }
+            
+            if (!startMarker) {
+                alert('请先在地图上点击设置起点');
+                return;
+            }
+            
+            const routeType = document.getElementById('mapRouteType').value;
+            if (routeType === 'point_to_point' && !endMarker) {
+                alert('点对点路线需要设置终点');
+                return;
+            }
+            
+            const distance = parseInt(document.getElementById('mapDistance').value);
+            const curveLevel = document.getElementById('mapCurveLevel').value;
+            
+            // 显示加载状态
+            document.getElementById('routeInfo').style.display = 'block';
+            document.getElementById('routeInfo').innerHTML = '🔄 正在生成路线，请稍候...';
+            
+            try {
+                const startLatLng = startMarker.getLatLng();
+                let params = {
+                    start_point: [startLatLng.lng, startLatLng.lat], // [lng, lat] 格式
+                    target_distance: distance * 1000, // 转换为米
+                    curve_level: curveLevel,
+                    route_type: routeType,
+                    profile: 'car',
+                    instructions: true,
+                    points_encoded: false
+                };
+                
+                if (routeType === 'roundtrip') {
+                    params.start_bearing = 0; // 默认北向
+                } else {
+                    const endLatLng = endMarker.getLatLng();
+                    params.end_point = [endLatLng.lng, endLatLng.lat]; // [lng, lat] 格式
+                }
+                
+                console.log('生成路线参数:', params);
+                
+                const result = await funRouteGenerator.generateFunRoute(params);
+                
+                console.log('路线生成成功:', result);
+                
+                // 清除之前的路线
+                if (routeLayer) {
+                    map.removeLayer(routeLayer);
+                }
+                
+                // 显示新路线
+                if (result.paths && result.paths.length > 0) {
+                    const path = result.paths[0];
+                    if (path.points && path.points.coordinates) {
+                        const coordinates = path.points.coordinates.map(point => [point[1], point[0]]); // 转换为leaflet格式
+                        routeLayer = L.polyline(coordinates, {
+                            color: '#007bff',
+                            weight: 4,
+                            opacity: 0.8
+                        }).addTo(map);
+                        
+                        // 调整地图视图以显示完整路线
+                        const layers = [routeLayer];
+                        if (startMarker) layers.push(startMarker);
+                        if (endMarker) layers.push(endMarker);
+                        const group = new L.featureGroup(layers);
+                        map.fitBounds(group.getBounds().pad(0.1));
+                    }
+                }
+                
+                // 显示路线信息
+                displayRouteInfo(result);
+                
+            } catch (error) {
+                console.error('路线生成错误:', error);
+                document.getElementById('routeInfo').innerHTML = `❌ 生成路线失败: ${error.message}`;
+            }
+        }
+        
+        function clearMap() {
+            // 清除标记
+            if (markersLayer) {
+                markersLayer.clearLayers();
+            }
+            startMarker = null;
+            endMarker = null;
+            
+            // 清除路线
+            if (routeLayer) {
+                map.removeLayer(routeLayer);
+                routeLayer = null;
+            }
+            
+            // 清除路线信息
+            document.getElementById('routeInfo').style.display = 'none';
+            document.getElementById('routeInfo').innerHTML = '';
+        }
+        
+        function displayRouteInfo(result) {
+            let info = '<h3>🎉 路线生成成功!</h3>';
+            
+            if (result.route_info) {
+                info += '<div style="margin-bottom: 15px;">';
+                info += `<strong>路线类型:</strong> ${result.route_info.type === 'roundtrip' ? '环形路线' : '点对点路线'}<br>`;
+                info += `<strong>目标距离:</strong> ${(result.route_info.target_distance/1000).toFixed(1)} km<br>`;
+                info += `<strong>实际距离:</strong> ${(result.route_info.actual_distance/1000).toFixed(1)} km<br>`;
+                info += `<strong>弯道等级:</strong> ${result.route_info.curve_level}<br>`;
+                if (result.route_info.start_bearing !== undefined) {
+                    info += `<strong>起始方向:</strong> ${result.route_info.start_bearing}°<br>`;
+                }
+                if (result.route_info.direct_distance) {
+                    info += `<strong>直线距离:</strong> ${(result.route_info.direct_distance/1000).toFixed(1)} km<br>`;
+                }
+                info += '</div>';
+            }
+            
+            if (result.paths && result.paths.length > 0) {
+                const path = result.paths[0];
+                info += '<div style="margin-bottom: 15px;">';
+                info += `<strong>实际路径距离:</strong> ${(path.distance/1000).toFixed(2)} km<br>`;
+                info += `<strong>预计行驶时间:</strong> ${Math.round(path.time/60000)} 分钟<br>`;
+                if (path.points && path.points.coordinates) {
+                    info += `<strong>路径点数:</strong> ${path.points.coordinates.length}<br>`;
+                }
+                info += '</div>';
+                
+                // 显示部分导航指令
+                if (path.instructions && path.instructions.length > 0) {
+                    info += '<div style="margin-top: 15px;">';
+                    info += '<strong>导航指令 (前5条):</strong><br>';
+                    info += '<ol style="margin: 5px 0; padding-left: 20px; font-size: 12px;">';
+                    path.instructions.slice(0, 5).forEach(instruction => {
+                        info += `<li>${instruction.text} (${(instruction.distance/1000).toFixed(1)} km)</li>`;
+                    });
+                    if (path.instructions.length > 5) {
+                        info += `<li>... 还有 ${path.instructions.length - 5} 条指令</li>`;
+                    }
+                    info += '</ol>';
+                    info += '</div>';
+                }
+            }
+            
+            document.getElementById('routeInfo').innerHTML = info;
+        }
+    </script>
+</body>
+</html>

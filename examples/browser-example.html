@@ -1,0 +1,417 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Blucap - 浏览器示例</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            background: white;
+            border-radius: 10px;
+            padding: 30px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #2c3e50;
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        .form-group {
+            margin-bottom: 20px;
+        }
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+            color: #34495e;
+        }
+        input, select, button {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            font-size: 14px;
+        }
+        button {
+            background-color: #3498db;
+            color: white;
+            border: none;
+            cursor: pointer;
+            font-weight: bold;
+            margin-top: 10px;
+        }
+        button:hover {
+            background-color: #2980b9;
+        }
+        button:disabled {
+            background-color: #bdc3c7;
+            cursor: not-allowed;
+        }
+        .result {
+            margin-top: 30px;
+            padding: 20px;
+            border-radius: 5px;
+            display: none;
+        }
+        .result.success {
+            background-color: #d4edda;
+            border: 1px solid #c3e6cb;
+            color: #155724;
+        }
+        .result.error {
+            background-color: #f8d7da;
+            border: 1px solid #f5c6cb;
+            color: #721c24;
+        }
+        .route-info {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin-top: 15px;
+        }
+        .info-card {
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 5px;
+            text-align: center;
+        }
+        .info-value {
+            font-size: 24px;
+            font-weight: bold;
+            color: #2c3e50;
+        }
+        .info-label {
+            font-size: 12px;
+            color: #7f8c8d;
+            margin-top: 5px;
+        }
+        .loading {
+            text-align: center;
+            color: #3498db;
+        }
+        .examples {
+            margin-top: 30px;
+            padding: 20px;
+            background: #ecf0f1;
+            border-radius: 5px;
+        }
+        .example-btn {
+            margin: 5px;
+            width: auto;
+            display: inline-block;
+            padding: 8px 15px;
+            background: #95a5a6;
+        }
+        .example-btn:hover {
+            background: #7f8c8d;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🚗 Blucap</h1>
+        <p style="text-align: center; color: #7f8c8d;">趣味路线生成器 - 浏览器演示</p>
+        
+        <!-- API 密钥配置 -->
+        <div class="form-group">
+            <label for="apiKey">GraphHopper API 密钥:</label>
+            <input type="password" id="apiKey" placeholder="请输入你的 GraphHopper API 密钥">
+            <small style="color: #7f8c8d;">获取免费 API 密钥: <a href="https://www.graphhopper.com/dashboard/" target="_blank">GraphHopper Dashboard</a></small>
+        </div>
+        
+        <!-- 路线类型选择 -->
+        <div class="form-group">
+            <label for="routeType">路线类型:</label>
+            <select id="routeType" onchange="toggleRouteOptions()">
+                <option value="roundtrip">环形路线</option>
+                <option value="point-to-point">点对点路线</option>
+            </select>
+        </div>
+        
+        <!-- 起始点 -->
+        <div class="form-group">
+            <label for="startPoint">起始点 (纬度, 经度):</label>
+            <input type="text" id="startPoint" placeholder="例如: 39.9042, 116.4074" value="39.9042, 116.4074">
+        </div>
+        
+        <!-- 终点 (仅点对点路线) -->
+        <div class="form-group" id="endPointGroup" style="display: none;">
+            <label for="endPoint">终点 (纬度, 经度):</label>
+            <input type="text" id="endPoint" placeholder="例如: 31.2304, 121.4737" value="31.2304, 121.4737">
+        </div>
+        
+        <!-- 距离设置 -->
+        <div class="form-group">
+            <label for="distance">目标距离 (km):</label>
+            <input type="number" id="distance" min="50" max="500" value="120">
+        </div>
+        
+        <!-- 弯道等级 -->
+        <div class="form-group">
+            <label for="curveLevel">弯道等级:</label>
+            <select id="curveLevel">
+                <option value="low">低 - 最快路线</option>
+                <option value="medium" selected>中 - 平衡路线</option>
+                <option value="high">高 - 风景路线</option>
+            </select>
+        </div>
+        
+        <!-- 起始方向 (仅环形路线) -->
+        <div class="form-group" id="bearingGroup">
+            <label for="startBearing">起始方向 (度):</label>
+            <input type="number" id="startBearing" min="0" max="360" value="0">
+            <small style="color: #7f8c8d;">0=北, 90=东, 180=南, 270=西</small>
+        </div>
+        
+        <!-- 生成按钮 -->
+        <button onclick="generateRoute()" id="generateBtn">🚀 生成路线</button>
+        
+        <!-- 结果显示 -->
+        <div id="result" class="result">
+            <div id="loading" class="loading" style="display: none;">
+                <p>🔄 正在生成路线，请稍候...</p>
+            </div>
+            <div id="routeResult" style="display: none;">
+                <h3>✅ 路线生成成功!</h3>
+                <div class="route-info">
+                    <div class="info-card">
+                        <div class="info-value" id="routeDistance">-</div>
+                        <div class="info-label">总距离 (km)</div>
+                    </div>
+                    <div class="info-card">
+                        <div class="info-value" id="routeTime">-</div>
+                        <div class="info-label">预计时间 (分钟)</div>
+                    </div>
+                    <div class="info-card">
+                        <div class="info-value" id="routeInstructions">-</div>
+                        <div class="info-label">导航指令数</div>
+                    </div>
+                </div>
+                <details style="margin-top: 15px;">
+                    <summary>查看详细路线数据</summary>
+                    <pre id="routeData" style="background: #f8f9fa; padding: 10px; border-radius: 5px; overflow-x: auto; font-size: 12px;"></pre>
+                </details>
+            </div>
+            <div id="errorResult" style="display: none;">
+                <h3>❌ 路线生成失败</h3>
+                <p id="errorMessage"></p>
+            </div>
+        </div>
+        
+        <!-- 示例按钮 -->
+        <div class="examples">
+            <h3>🎯 快速示例</h3>
+            <p>点击下面的按钮快速填充示例数据:</p>
+            <button class="example-btn" onclick="loadExample('beijing-roundtrip')">北京环形路线</button>
+            <button class="example-btn" onclick="loadExample('shanghai-hangzhou')">上海到杭州</button>
+            <button class="example-btn" onclick="loadExample('scenic-route')">风景绕行路线</button>
+            <button class="example-btn" onclick="loadExample('short-trip')">短途路线</button>
+        </div>
+    </div>
+    
+    <!-- 引入依赖 -->
+    <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
+    <script src="../dist/blucap.min.js"></script>
+    
+    <script>
+        let generator = null;
+        
+        // 切换路线选项显示
+        function toggleRouteOptions() {
+            const routeType = document.getElementById('routeType').value;
+            const endPointGroup = document.getElementById('endPointGroup');
+            const bearingGroup = document.getElementById('bearingGroup');
+            
+            if (routeType === 'point-to-point') {
+                endPointGroup.style.display = 'block';
+                bearingGroup.style.display = 'none';
+            } else {
+                endPointGroup.style.display = 'none';
+                bearingGroup.style.display = 'block';
+            }
+        }
+        
+        // 加载示例数据
+        function loadExample(type) {
+            const examples = {
+                'beijing-roundtrip': {
+                    routeType: 'roundtrip',
+                    startPoint: '39.9042, 116.4074',
+                    distance: 120,
+                    curveLevel: 'medium',
+                    startBearing: 90
+                },
+                'shanghai-hangzhou': {
+                    routeType: 'point-to-point',
+                    startPoint: '31.2304, 121.4737',
+                    endPoint: '30.2741, 120.1551',
+                    distance: 200,
+                    curveLevel: 'low'
+                },
+                'scenic-route': {
+                    routeType: 'point-to-point',
+                    startPoint: '22.3193, 114.1694',
+                    endPoint: '22.1987, 113.5439',
+                    distance: 300,
+                    curveLevel: 'high'
+                },
+                'short-trip': {
+                    routeType: 'roundtrip',
+                    startPoint: '25.0330, 121.5654',
+                    distance: 80,
+                    curveLevel: 'medium',
+                    startBearing: 0
+                }
+            };
+            
+            const example = examples[type];
+            if (example) {
+                document.getElementById('routeType').value = example.routeType;
+                document.getElementById('startPoint').value = example.startPoint;
+                document.getElementById('distance').value = example.distance;
+                document.getElementById('curveLevel').value = example.curveLevel;
+                
+                if (example.endPoint) {
+                    document.getElementById('endPoint').value = example.endPoint;
+                }
+                if (example.startBearing !== undefined) {
+                    document.getElementById('startBearing').value = example.startBearing;
+                }
+                
+                toggleRouteOptions();
+            }
+        }
+        
+        // 解析坐标点
+        function parsePoint(pointStr) {
+            const parts = pointStr.split(',').map(s => parseFloat(s.trim()));
+            if (parts.length !== 2 || parts.some(isNaN)) {
+                throw new Error('坐标格式错误，请使用 "纬度, 经度" 格式');
+            }
+            return parts;
+        }
+        
+        // 显示结果
+        function showResult(type, data = null) {
+            const result = document.getElementById('result');
+            const loading = document.getElementById('loading');
+            const routeResult = document.getElementById('routeResult');
+            const errorResult = document.getElementById('errorResult');
+            
+            // 隐藏所有子元素
+            loading.style.display = 'none';
+            routeResult.style.display = 'none';
+            errorResult.style.display = 'none';
+            
+            result.className = 'result';
+            result.style.display = 'block';
+            
+            if (type === 'loading') {
+                loading.style.display = 'block';
+            } else if (type === 'success') {
+                result.classList.add('success');
+                routeResult.style.display = 'block';
+                
+                // 填充路线信息
+                const path = data.paths[0];
+                document.getElementById('routeDistance').textContent = (path.distance / 1000).toFixed(1);
+                document.getElementById('routeTime').textContent = (path.time / 60000).toFixed(0);
+                document.getElementById('routeInstructions').textContent = path.instructions.length;
+                document.getElementById('routeData').textContent = JSON.stringify(data, null, 2);
+                
+            } else if (type === 'error') {
+                result.classList.add('error');
+                errorResult.style.display = 'block';
+                document.getElementById('errorMessage').textContent = data;
+            }
+        }
+        
+        // 生成路线
+        async function generateRoute() {
+            const apiKey = document.getElementById('apiKey').value.trim();
+            const routeType = document.getElementById('routeType').value;
+            const startPointStr = document.getElementById('startPoint').value.trim();
+            const distance = parseInt(document.getElementById('distance').value);
+            const curveLevel = document.getElementById('curveLevel').value;
+            
+            // 验证输入
+            if (!apiKey) {
+                showResult('error', '请输入 GraphHopper API 密钥');
+                return;
+            }
+            
+            if (!startPointStr) {
+                showResult('error', '请输入起始点坐标');
+                return;
+            }
+            
+            try {
+                // 创建生成器实例
+                if (!generator || generator.config.apiKey !== apiKey) {
+                    generator = new Blucap({
+                        apiKey: apiKey,
+                        locale: 'zh'
+                    });
+                }
+                
+                // 解析坐标
+                const startPoint = parsePoint(startPointStr);
+                
+                // 显示加载状态
+                showResult('loading');
+                document.getElementById('generateBtn').disabled = true;
+                
+                let route;
+                
+                if (routeType === 'roundtrip') {
+                    // 环形路线
+                    const startBearing = parseInt(document.getElementById('startBearing').value) || 0;
+                    
+                    route = await generator.generateRoundTrip({
+                        startPoint: startPoint,
+                        distance: distance,
+                        curveLevel: curveLevel,
+                        startBearing: startBearing
+                    });
+                } else {
+                    // 点对点路线
+                    const endPointStr = document.getElementById('endPoint').value.trim();
+                    if (!endPointStr) {
+                        throw new Error('请输入终点坐标');
+                    }
+                    
+                    const endPoint = parsePoint(endPointStr);
+                    
+                    route = await generator.generatePointToPoint({
+                        startPoint: startPoint,
+                        endPoint: endPoint,
+                        curveLevel: curveLevel,
+                        targetDistance: distance
+                    });
+                }
+                
+                // 显示成功结果
+                showResult('success', route);
+                
+            } catch (error) {
+                console.error('路线生成错误:', error);
+                showResult('error', error.message);
+            } finally {
+                document.getElementById('generateBtn').disabled = false;
+            }
+        }
+        
+        // 页面加载完成后初始化
+        document.addEventListener('DOMContentLoaded', function() {
+            toggleRouteOptions();
+        });
+    </script>
+</body>
+</html>
