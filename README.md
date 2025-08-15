@@ -605,9 +605,3 @@ const route = await generator.generatePointToPoint({
 - `high` - 弯曲路线，风景优美
 
 ---
-
-**Happy Routing! 🚴‍♂️🗺️**
-
-> 💡 **提示**: 如果您在使用过程中遇到问题，请查看 [调试指南](./DEBUG_GUIDE.md) 或 [详细示例](./USAGE_EXAMPLES.md)。#   b l u c a p 
- 
- 
