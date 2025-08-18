@@ -387,12 +387,12 @@
             let status = [];
             
             // 检查全局对象
-            if (typeof FunRouteGenerator !== 'undefined') {
-                status.push('✅ FunRouteGenerator 类已加载');
-                status.push(`   类型: ${typeof FunRouteGenerator}`);
+            if (typeof Blucap !== 'undefined') {
+                status.push('✅ Blucap 类已加载');
+                status.push(`   类型: ${typeof Blucap}`);
                 
                 // 检查实例方法
-                const instance = new FunRouteGenerator({ apiKey: 'test' });
+                const instance = new Blucap({ apiKey: 'test' });
                 const methods = ['generateFunRoute', 'generateRoundTrip', '_generateRoundTrip', '_generatePointToPoint'];
                 methods.forEach(method => {
                     if (typeof instance[method] === 'function') {
@@ -402,7 +402,7 @@
                     }
                 });
             } else {
-                status.push('❌ FunRouteGenerator 类未加载');
+                status.push('❌ Blucap 类未加载');
             }
             
             showResult('statusResult', status.join('\n'), 'info');
@@ -507,6 +507,40 @@
                     output += `- 实际距离: ${(result.route_info.actual_distance/1000).toFixed(1)} km\n`;
                     output += `- 弯道等级: ${result.route_info.curve_level}\n`;
                     output += `- 起始方向: ${result.route_info.start_bearing}°\n\n`;
+                    
+                    // 添加质量指标信息
+                    if (result.route_info.quality_score) {
+                        const score = result.route_info.quality_score;
+                        output += `质量评分:\n`;
+                        output += `- 总体评分: ${(score.overall_score * 100).toFixed(1)}% (${score.overall_grade})\n`;
+                        if (score.base_scores) {
+                            output += `- 环形闭合: ${(score.base_scores.closure_quality * 100).toFixed(1)}%\n`;
+                            output += `- 折返避免: ${(score.base_scores.backtrack_avoidance * 100).toFixed(1)}%\n`;
+                        }
+                    }
+                    
+                    if (result.route_info.closure_validation) {
+                        const validation = result.route_info.closure_validation;
+                        output += `\n环形闭合验证:\n`;
+                        output += `- 闭合状态: ${validation.is_closed ? '✅ 已闭合' : '❌ 未闭合'}\n`;
+                        output += `- 闭合距离: ${validation.closure_distance.toFixed(1)} 米\n`;
+                    }
+                    
+                    if (result.route_info.backtracking_analysis) {
+                        const analysis = result.route_info.backtracking_analysis;
+                        output += `\n原路折返分析:\n`;
+                        output += `- 折返比例: ${(analysis.backtrack_ratio * 100).toFixed(1)}%\n`;
+                        output += `- 严重程度: ${analysis.severity_level}\n`;
+                    }
+                    
+                    if (result.route_info.retry_info) {
+                        const retry = result.route_info.retry_info;
+                        output += `\n智能重试信息:\n`;
+                        output += `- 重试次数: ${retry.retry_count}\n`;
+                        output += `- 质量提升: ${(retry.improvement * 100).toFixed(1)}%\n`;
+                    }
+                    
+                    output += '\n';
                 }
                 
                 if (result.paths && result.paths.length > 0) {
@@ -712,6 +746,9 @@
                     info += `<strong>直线距离:</strong> ${(result.route_info.direct_distance/1000).toFixed(1)} km<br>`;
                 }
                 info += '</div>';
+                
+                // 显示路径质量指标
+                info += displayQualityMetrics(result.route_info);
             }
             
             if (result.paths && result.paths.length > 0) {
@@ -741,6 +778,158 @@
             }
             
             document.getElementById('routeInfo').innerHTML = info;
+        }
+        
+        function displayQualityMetrics(routeInfo) {
+            let qualityHtml = '';
+            
+            // 路径质量总评分
+            if (routeInfo.quality_score) {
+                const score = routeInfo.quality_score;
+                qualityHtml += '<div style="margin: 20px 0; padding: 15px; background-color: #f8f9fa; border-radius: 8px; border-left: 4px solid #007bff;">';
+                qualityHtml += '<h4 style="margin: 0 0 10px 0; color: #007bff;">📊 路径质量评分</h4>';
+                
+                // 总体评分
+                const gradeColor = getGradeColor(score.overall_grade);
+                qualityHtml += `<div style="margin-bottom: 10px;"><strong>总体评分:</strong> <span style="color: ${gradeColor}; font-weight: bold;">${(score.overall_score * 100).toFixed(1)}% (${score.overall_grade})</span></div>`;
+                
+                // 基础指标
+                if (score.base_scores) {
+                    qualityHtml += '<div style="margin: 10px 0;"><strong>基础指标:</strong></div>';
+                    qualityHtml += '<div style="margin-left: 15px; font-size: 13px;">';
+                    qualityHtml += `• 环形闭合质量: ${(score.base_scores.closure_quality * 100).toFixed(1)}%<br>`;
+                    qualityHtml += `• 距离精度: ${(score.base_scores.distance_precision * 100).toFixed(1)}%<br>`;
+                    qualityHtml += `• 路径平滑度: ${(score.base_scores.path_smoothness * 100).toFixed(1)}%<br>`;
+                    qualityHtml += `• 原路折返避免: ${(score.base_scores.backtrack_avoidance * 100).toFixed(1)}%<br>`;
+                    qualityHtml += '</div>';
+                }
+                
+                // 高级指标
+                if (score.advanced_scores) {
+                    qualityHtml += '<div style="margin: 10px 0;"><strong>高级指标:</strong></div>';
+                    qualityHtml += '<div style="margin-left: 15px; font-size: 13px;">';
+                    qualityHtml += `• 路线效率: ${(score.advanced_scores.route_efficiency * 100).toFixed(1)}%<br>`;
+                    qualityHtml += `• 几何一致性: ${(score.advanced_scores.geometric_consistency * 100).toFixed(1)}%<br>`;
+                    qualityHtml += `• 弯道分布: ${(score.advanced_scores.curve_distribution * 100).toFixed(1)}%<br>`;
+                    qualityHtml += `• 导航友好性: ${(score.advanced_scores.navigation_friendliness * 100).toFixed(1)}%<br>`;
+                    qualityHtml += '</div>';
+                }
+                
+                // 改进建议
+                if (score.improvements && score.improvements.length > 0) {
+                    qualityHtml += '<div style="margin: 10px 0;"><strong>改进建议:</strong></div>';
+                    qualityHtml += '<ul style="margin: 5px 0 0 15px; font-size: 13px; padding-left: 15px;">';
+                    score.improvements.forEach(improvement => {
+                        qualityHtml += `<li>${improvement}</li>`;
+                    });
+                    qualityHtml += '</ul>';
+                }
+                
+                qualityHtml += '</div>';
+            }
+            
+            // 环形闭合验证
+            if (routeInfo.closure_validation) {
+                const validation = routeInfo.closure_validation;
+                qualityHtml += '<div style="margin: 15px 0; padding: 12px; background-color: #f1f8ff; border-radius: 6px; border-left: 3px solid #0366d6;">';
+                qualityHtml += '<h5 style="margin: 0 0 8px 0; color: #0366d6;">🔄 环形闭合验证</h5>';
+                qualityHtml += `<div style="font-size: 13px;"><strong>闭合状态:</strong> ${validation.is_closed ? '✅ 已闭合' : '❌ 未闭合'}</div>`;
+                qualityHtml += `<div style="font-size: 13px;"><strong>闭合距离:</strong> ${validation.closure_distance.toFixed(1)} 米</div>`;
+                qualityHtml += `<div style="font-size: 13px;"><strong>起点偏差:</strong> ${validation.start_point_deviation.toFixed(1)} 米</div>`;
+                qualityHtml += `<div style="font-size: 13px;"><strong>质量等级:</strong> ${validation.quality_grade}</div>`;
+                qualityHtml += '</div>';
+            }
+            
+            // 原路折返检测
+            if (routeInfo.backtracking_analysis) {
+                const analysis = routeInfo.backtracking_analysis;
+                qualityHtml += '<div style="margin: 15px 0; padding: 12px; background-color: #fff8f0; border-radius: 6px; border-left: 3px solid #f66a0a;">';
+                qualityHtml += '<h5 style="margin: 0 0 8px 0; color: #f66a0a;">↩️ 原路折返分析</h5>';
+                qualityHtml += `<div style="font-size: 13px;"><strong>折返比例:</strong> ${(analysis.backtrack_ratio * 100).toFixed(1)}%</div>`;
+                qualityHtml += `<div style="font-size: 13px;"><strong>折返段数:</strong> ${analysis.backtrack_segments}</div>`;
+                qualityHtml += `<div style="font-size: 13px;"><strong>严重程度:</strong> ${analysis.severity_level}</div>`;
+                if (analysis.total_backtrack_distance > 0) {
+                    qualityHtml += `<div style="font-size: 13px;"><strong>折返距离:</strong> ${(analysis.total_backtrack_distance/1000).toFixed(2)} km</div>`;
+                }
+                qualityHtml += '</div>';
+            }
+            
+            // 路径平滑处理
+            if (routeInfo.smoothing_applied && routeInfo.smoothing_stats) {
+                const stats = routeInfo.smoothing_stats;
+                qualityHtml += '<div style="margin: 15px 0; padding: 12px; background-color: #f0f9ff; border-radius: 6px; border-left: 3px solid #0ea5e9;">';
+                qualityHtml += '<h5 style="margin: 0 0 8px 0; color: #0ea5e9;">🌊 路径平滑处理</h5>';
+                qualityHtml += `<div style="font-size: 13px;"><strong>平滑状态:</strong> ✅ 已应用</div>`;
+                qualityHtml += `<div style="font-size: 13px;"><strong>处理点数:</strong> ${stats.points_smoothed}</div>`;
+                qualityHtml += `<div style="font-size: 13px;"><strong>平滑强度:</strong> ${stats.smoothing_intensity}</div>`;
+                qualityHtml += `<div style="font-size: 13px;"><strong>质量提升:</strong> ${(stats.quality_improvement * 100).toFixed(1)}%</div>`;
+                qualityHtml += '</div>';
+            }
+            
+            // 多层次验证结果
+            if (routeInfo.multi_level_validation) {
+                const validation = routeInfo.multi_level_validation;
+                qualityHtml += '<div style="margin: 15px 0; padding: 12px; background-color: #f0fdf4; border-radius: 6px; border-left: 3px solid #16a34a;">';
+                qualityHtml += '<h5 style="margin: 0 0 8px 0; color: #16a34a;">✅ 多层次验证</h5>';
+                qualityHtml += `<div style="font-size: 13px;"><strong>总体通过:</strong> ${validation.overall_passed ? '✅ 通过' : '❌ 未通过'}</div>`;
+                qualityHtml += `<div style="font-size: 13px;"><strong>验证等级:</strong> ${validation.validation_grade}</div>`;
+                qualityHtml += `<div style="font-size: 13px;"><strong>通过项目:</strong> ${validation.passed_validations}/${validation.total_validations}</div>`;
+                
+                if (validation.failed_validations && validation.failed_validations.length > 0) {
+                    qualityHtml += '<div style="margin-top: 8px; font-size: 13px;"><strong>未通过项目:</strong></div>';
+                    qualityHtml += '<ul style="margin: 3px 0 0 15px; font-size: 12px; padding-left: 15px;">';
+                    validation.failed_validations.forEach(item => {
+                        qualityHtml += `<li>${item}</li>`;
+                    });
+                    qualityHtml += '</ul>';
+                }
+                
+                if (validation.recommendations && validation.recommendations.length > 0) {
+                    qualityHtml += '<div style="margin-top: 8px; font-size: 13px;"><strong>建议:</strong></div>';
+                    qualityHtml += '<ul style="margin: 3px 0 0 15px; font-size: 12px; padding-left: 15px;">';
+                    validation.recommendations.forEach(rec => {
+                        qualityHtml += `<li>${rec}</li>`;
+                    });
+                    qualityHtml += '</ul>';
+                }
+                
+                qualityHtml += '</div>';
+            }
+            
+            // 智能重试信息
+            if (routeInfo.retry_info) {
+                const retry = routeInfo.retry_info;
+                qualityHtml += '<div style="margin: 15px 0; padding: 12px; background-color: #fefce8; border-radius: 6px; border-left: 3px solid #eab308;">';
+                qualityHtml += '<h5 style="margin: 0 0 8px 0; color: #eab308;">🔄 智能重试信息</h5>';
+                qualityHtml += `<div style="font-size: 13px;"><strong>重试次数:</strong> ${retry.retry_count}</div>`;
+                qualityHtml += `<div style="font-size: 13px;"><strong>原始评分:</strong> ${(retry.original_score * 100).toFixed(1)}%</div>`;
+                qualityHtml += `<div style="font-size: 13px;"><strong>最终评分:</strong> ${(retry.final_score * 100).toFixed(1)}%</div>`;
+                qualityHtml += `<div style="font-size: 13px;"><strong>质量提升:</strong> ${(retry.improvement * 100).toFixed(1)}%</div>`;
+                
+                if (retry.strategies_used && retry.strategies_used.length > 0) {
+                    qualityHtml += '<div style="margin-top: 8px; font-size: 13px;"><strong>使用策略:</strong></div>';
+                    qualityHtml += '<ul style="margin: 3px 0 0 15px; font-size: 12px; padding-left: 15px;">';
+                    retry.strategies_used.forEach(strategy => {
+                        qualityHtml += `<li>${strategy}</li>`;
+                    });
+                    qualityHtml += '</ul>';
+                }
+                
+                qualityHtml += '</div>';
+            }
+            
+            return qualityHtml;
+        }
+        
+        function getGradeColor(grade) {
+            switch(grade) {
+                case 'A': return '#16a34a'; // 绿色
+                case 'B': return '#65a30d'; // 浅绿色
+                case 'C': return '#eab308'; // 黄色
+                case 'D': return '#f97316'; // 橙色
+                case 'F': return '#dc2626'; // 红色
+                default: return '#6b7280'; // 灰色
+            }
         }
     </script>
 </body>

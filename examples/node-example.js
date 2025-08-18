@@ -133,7 +133,7 @@ async function example5_ErrorHandling() {
   
   // 测试无效 API 密钥
   try {
-    const invalidGenerator = new FunRouteGenerator({
+    const invalidGenerator = new Blucap({
       apiKey: 'invalid-key'
     });
     
