@@ -379,27 +379,132 @@ class Blucap {
         const numPoints = this._calculateOptimalPointCount(targetDistance, curveLevel);
         const baseRadius = this._calculateBaseRadius(targetDistance, curveLevel);
         
-        // 确定螺旋方向（顺时针或逆时针）
-        const spiralDirection = this._determineSpiralDirection(startBearing);
+        // 使用改进的自然角度分布策略
+        const startAngle = startBearing || 0;
+        const angleDistribution = this._calculateNaturalAngleDistribution(numPoints, curveLevel);
         
         for (let i = 0; i < numPoints; i++) {
-            const progress = (i + 1) / (numPoints + 1); // 避免最后一点过于接近起点
+            // 计算当前点的角度（自然分布）
+            const currentAngle = startAngle + angleDistribution[i];
             
-            // 螺旋式半径分布，确保路径不重叠
-            const spiralRadius = this._calculateSpiralRadius(baseRadius, progress, curveLevel);
+            // 使用多层半径策略，创建更自然的环形
+            const radiusVariation = this._calculateCircularRadius(baseRadius, i, numPoints, curveLevel);
             
-            // 改进的角度分布，避免均匀分布导致的单调性
-            const angle = this._calculateSpiralAngle(startBearing, progress, spiralDirection, curveLevel);
+            // 计算基础圆周点
+            const circularPoint = this._calculatePointAtDistance(startPoint, radiusVariation, currentAngle);
             
-            const point = this._calculatePointAtDistance(startPoint, spiralRadius, angle);
-            
-            // 增强的随机偏移策略
-            const enhancedPoint = this._applyEnhancedOffset(point, spiralRadius, curveLevel, i);
+            // 应用智能偏移，避免过于规则的圆形
+            const enhancedPoint = this._applyCircularOffset(circularPoint, radiusVariation, curveLevel, i, currentAngle);
             
             points.push(enhancedPoint);
         }
         
         return points;
+    }
+    
+    /**
+     * 计算自然角度分布
+     * @param {number} numPoints - 点数量
+     * @param {string} curveLevel - 弯道等级
+     * @returns {Array} 角度分布数组
+     */
+    _calculateNaturalAngleDistribution(numPoints, curveLevel) {
+        const angles = [];
+        const goldenAngle = 137.508; // 黄金角度，创造自然螺旋
+        
+        // 根据弯道等级调整分布策略
+        const distributionStrategy = {
+            'low': 'uniform',      // 低弯道：均匀分布
+            'medium': 'golden',    // 中弯道：黄金角度分布
+            'high': 'fibonacci'    // 高弯道：斐波那契分布
+        };
+        
+        const strategy = distributionStrategy[curveLevel] || 'golden';
+        
+        switch (strategy) {
+            case 'uniform':
+                return this._generateUniformAngles(numPoints);
+            case 'golden':
+                return this._generateGoldenAngles(numPoints, goldenAngle);
+            case 'fibonacci':
+                return this._generateFibonacciAngles(numPoints);
+            default:
+                return this._generateGoldenAngles(numPoints, goldenAngle);
+        }
+    }
+    
+    /**
+     * 生成均匀角度分布
+     * @param {number} numPoints - 点数量
+     * @returns {Array} 角度数组
+     */
+    _generateUniformAngles(numPoints) {
+        const angles = [];
+        const angleStep = 360 / (numPoints + 1);
+        
+        for (let i = 0; i < numPoints; i++) {
+            angles.push((i + 1) * angleStep);
+        }
+        
+        return angles;
+    }
+    
+    /**
+     * 生成黄金角度分布
+     * @param {number} numPoints - 点数量
+     * @param {number} goldenAngle - 黄金角度
+     * @returns {Array} 角度数组
+     */
+    _generateGoldenAngles(numPoints, goldenAngle) {
+        const angles = [];
+        let currentAngle = 0;
+        
+        for (let i = 0; i < numPoints; i++) {
+            currentAngle += goldenAngle;
+            // 添加轻微的随机变化，使分布更自然
+            const variation = (Math.random() - 0.5) * 10; // ±5度变化
+            angles.push((currentAngle + variation) % 360);
+        }
+        
+        return angles.sort((a, b) => a - b); // 按角度排序
+    }
+    
+    /**
+     * 生成斐波那契角度分布
+     * @param {number} numPoints - 点数量
+     * @returns {Array} 角度数组
+     */
+    _generateFibonacciAngles(numPoints) {
+        const angles = [];
+        const phi = (1 + Math.sqrt(5)) / 2; // 黄金比例
+        
+        for (let i = 0; i < numPoints; i++) {
+            // 使用斐波那契螺旋公式
+            const angle = (i * 360 / phi) % 360;
+            // 添加基于斐波那契数列的变化
+            const fibVariation = this._getFibonacciVariation(i) * 5;
+            angles.push((angle + fibVariation) % 360);
+        }
+        
+        return angles.sort((a, b) => a - b);
+    }
+    
+    /**
+     * 获取斐波那契变化值
+     * @param {number} index - 索引
+     * @returns {number} 变化值
+     */
+    _getFibonacciVariation(index) {
+        if (index <= 1) return index;
+        
+        let a = 0, b = 1;
+        for (let i = 2; i <= index; i++) {
+            const temp = a + b;
+            a = b;
+            b = temp;
+        }
+        
+        return (b % 10) - 5; // 将斐波那契数转换为-5到5的变化值
     }
 
     /**
@@ -431,7 +536,70 @@ class Blucap {
     }
 
     /**
-     * 计算螺旋式半径
+     * 计算圆周半径变化
+     */
+    _calculateCircularRadius(baseRadius, index, totalPoints, curveLevel) {
+        // 创建多层半径分布，避免完美圆形
+        const radiusVariation = curveLevel === "high" ? 0.3 : (curveLevel === "medium" ? 0.2 : 0.15);
+        const minRadius = baseRadius * (1 - radiusVariation);
+        const maxRadius = baseRadius * (1 + radiusVariation);
+        
+        // 使用正弦波创建自然的半径变化
+        const wavePhase = (index / totalPoints) * 2 * Math.PI;
+        const waveAmplitude = (maxRadius - minRadius) / 2;
+        const averageRadius = (minRadius + maxRadius) / 2;
+        
+        return averageRadius + Math.sin(wavePhase) * waveAmplitude;
+    }
+
+    /**
+     * 应用圆周智能偏移
+     */
+    _applyCircularOffset(point, radius, curveLevel, index, currentAngle) {
+        // 基于角度的智能偏移，确保环形的自然性
+        const offsetMagnitude = Math.min(radius * 0.08, 2000); // 进一步减少偏移幅度
+        const offsetScale = curveLevel === "high" ? 0.6 : (curveLevel === "medium" ? 0.4 : 0.3);
+        
+        // 使用改进的自然变化算法
+        const naturalVariation = this._calculateNaturalVariation(index, currentAngle, radius);
+        const offsetAngle = currentAngle + 90 + naturalVariation.angleOffset;
+        const offsetDistance = offsetMagnitude * offsetScale * naturalVariation.distanceMultiplier;
+        
+        const offsetPoint = this._calculatePointAtDistance(point, offsetDistance, offsetAngle);
+        return offsetPoint;
+    }
+    
+    /**
+     * 计算自然变化
+     * @param {number} index - 点索引
+     * @param {number} angle - 角度
+     * @param {number} radius - 半径
+     * @returns {Object} 变化参数
+     */
+    _calculateNaturalVariation(index, angle, radius) {
+        // 使用多重正弦波叠加创造更自然的变化
+        const wave1 = Math.sin(angle * Math.PI / 180) * 30; // 基础波动
+        const wave2 = Math.cos(angle * Math.PI / 180 + index * 0.5) * 20; // 次级波动
+        const wave3 = Math.sin(angle * Math.PI / 90 + index * 0.3) * 15; // 高频波动
+        
+        // 添加基于黄金比例的微调
+        const goldenRatio = (1 + Math.sqrt(5)) / 2;
+        const goldenVariation = Math.sin(index * goldenRatio) * 10;
+        
+        // 计算角度偏移
+        const angleOffset = wave1 + wave3 + goldenVariation;
+        
+        // 计算距离倍数（保持在合理范围内）
+        const distanceMultiplier = 0.7 + (wave2 + goldenVariation) / 100;
+        
+        return {
+            angleOffset: Math.max(-45, Math.min(45, angleOffset)), // 限制角度偏移范围
+            distanceMultiplier: Math.max(0.5, Math.min(1.2, distanceMultiplier)) // 限制距离倍数范围
+        };
+    }
+
+    /**
+     * 计算螺旋式半径（保留用于兼容性）
      */
     _calculateSpiralRadius(baseRadius, progress, curveLevel) {
         // 螺旋式半径分布，内圈到外圈渐进
@@ -443,7 +611,7 @@ class Blucap {
     }
 
     /**
-     * 计算螺旋式角度
+     * 计算螺旋式角度（保留用于兼容性）
      */
     _calculateSpiralAngle(startBearing, progress, spiralDirection, curveLevel) {
         // 非均匀角度分布，增加路径的自然性
@@ -454,7 +622,7 @@ class Blucap {
     }
 
     /**
-     * 应用增强的随机偏移
+     * 应用增强的随机偏移（保留用于兼容性）
      */
     _applyEnhancedOffset(point, radius, curveLevel, index) {
         // 基于半径和弯道等级的智能偏移
@@ -719,14 +887,100 @@ class Blucap {
         // 验证起点是否接近原始起点
         const startPointDistance = this._calculateDistance(startPoint, routeStart);
         
+        // 增强的几何验证
+        const geometryAnalysis = this._analyzeRouteGeometry(coordinates, startPoint, targetDistance);
+        
+        // 综合评估环形质量
+        const overallValidity = this._evaluateCircularQuality({
+            closureDistance,
+            startPointDistance,
+            geometryAnalysis,
+            targetDistance
+        });
+        
         return {
-            is_valid: closureDistance <= 500 && startPointDistance <= 200, // 500米闭合阈值，200米起点偏差阈值
+            is_valid: overallValidity.is_valid,
             closure_distance: closureDistance,
             closure_ratio: closureRatio,
             start_point_deviation: startPointDistance,
             route_start: routeStart,
             route_end: routeEnd,
-            total_points: coordinates.length
+            total_points: coordinates.length,
+            geometry_analysis: geometryAnalysis,
+            circular_quality_score: overallValidity.quality_score,
+            recommendations: overallValidity.recommendations
+        };
+    }
+    
+    /**
+     * 分析路径几何特征
+     * @param {Array} coordinates - 路径坐标数组
+     * @param {Object} startPoint - 起始点
+     * @param {number} targetDistance - 目标距离
+     * @returns {Object} 几何分析结果
+     */
+    _analyzeRouteGeometry(coordinates, startPoint, targetDistance) {
+        // 计算路径中心点
+        const center = this._calculateRouteCenter(coordinates);
+        
+        // 分析路径的圆形度
+        const circularity = this._calculateCircularity(coordinates, center);
+        
+        // 分析路径的对称性
+        const symmetry = this._calculatePathSymmetry(coordinates, center);
+        
+        // 分析路径的均匀性
+        const uniformity = this._calculatePathUniformity(coordinates, center);
+        
+        // 检测路径的凸性（是否为凸多边形）
+        const convexity = this._analyzePathConvexity(coordinates);
+        
+        // 计算路径的紧凑度
+        const compactness = this._calculatePathCompactness(coordinates, targetDistance);
+        
+        return {
+            center,
+            circularity,
+            symmetry,
+            uniformity,
+            convexity,
+            compactness,
+            overall_geometry_score: (circularity + symmetry + uniformity + convexity + compactness) / 5
+        };
+    }
+    
+    /**
+     * 评估环形路线的整体质量
+     * @param {Object} params - 评估参数
+     * @returns {Object} 质量评估结果
+     */
+    _evaluateCircularQuality(params) {
+        const { closureDistance, startPointDistance, geometryAnalysis, targetDistance } = params;
+        
+        // 闭合度评分
+        const closureScore = Math.max(0, 1 - (closureDistance / 500));
+        
+        // 起点偏差评分
+        const startDeviationScore = Math.max(0, 1 - (startPointDistance / 200));
+        
+        // 几何形状评分
+        const geometryScore = geometryAnalysis.overall_geometry_score;
+        
+        // 综合质量评分
+        const qualityScore = (closureScore * 0.3 + startDeviationScore * 0.2 + geometryScore * 0.5);
+        
+        // 生成改进建议
+        const recommendations = [];
+        if (closureScore < 0.8) recommendations.push('改善路线闭合度');
+        if (startDeviationScore < 0.8) recommendations.push('减少起点偏差');
+        if (geometryAnalysis.circularity < 0.6) recommendations.push('提高路径圆形度');
+        if (geometryAnalysis.symmetry < 0.6) recommendations.push('增强路径对称性');
+        if (geometryAnalysis.uniformity < 0.6) recommendations.push('改善路径均匀性');
+        
+        return {
+            is_valid: qualityScore >= 0.7 && closureDistance <= 500 && startPointDistance <= 200,
+            quality_score: qualityScore,
+            recommendations
         };
     }
     
@@ -853,10 +1107,11 @@ class Blucap {
          }
          
          const backtrackSegments = [];
-         const minBacktrackDistance = 200; // 最小折返检测距离(米)
-         const angleThreshold = 150; // 角度阈值(度)，超过此角度认为是折返
+         const minBacktrackDistance = 100; // 降低最小折返检测距离(米)
+         const angleThreshold = 120; // 降低角度阈值(度)，提高敏感度
+         const microBacktrackThreshold = 90; // 微小回头路阈值(度)
          
-         // 分析路径段，检测折返
+         // 多层次分析路径段，检测不同程度的折返
          for (let i = 2; i < coordinates.length - 1; i++) {
              const prevPoint = coordinates[i - 2];
              const currentPoint = coordinates[i - 1];
@@ -872,26 +1127,35 @@ class Blucap {
                  angleDiff = 360 - angleDiff;
              }
              
-             // 检测是否为折返（角度变化大且距离足够）
-             if (angleDiff > angleThreshold) {
-                 const segmentDistance = this._calculateDistance(prevPoint, nextPoint);
-                 
-                 if (segmentDistance > minBacktrackDistance) {
-                     // 进一步验证：检查是否真的在走回头路
-                     const isRealBacktrack = this._verifyBacktrackSegment(
-                         coordinates, i - 2, i, minBacktrackDistance
-                     );
-                     
-                     if (isRealBacktrack) {
-                         backtrackSegments.push({
-                             start_index: i - 2,
-                             end_index: i,
-                             angle_change: angleDiff,
-                             distance: segmentDistance,
-                             severity: this._calculateBacktrackSeverity(angleDiff, segmentDistance)
-                         });
-                     }
-                 }
+             const segmentDistance = this._calculateDistance(prevPoint, nextPoint);
+             
+             // 多层次检测：严重回头路和微小回头路
+             let isBacktrack = false;
+             let backtrackType = 'none';
+             
+             if (angleDiff > angleThreshold && segmentDistance > minBacktrackDistance) {
+                 // 严重回头路检测
+                 isBacktrack = this._verifyBacktrackSegment(
+                     coordinates, i - 2, i, minBacktrackDistance
+                 );
+                 backtrackType = 'severe';
+             } else if (angleDiff > microBacktrackThreshold && segmentDistance > minBacktrackDistance * 0.5) {
+                 // 微小回头路检测（更敏感）
+                 isBacktrack = this._verifyMicroBacktrack(
+                     coordinates, i - 2, i, minBacktrackDistance * 0.5
+                 );
+                 backtrackType = 'micro';
+             }
+             
+             if (isBacktrack) {
+                 backtrackSegments.push({
+                     start_index: i - 2,
+                     end_index: i,
+                     angle_change: angleDiff,
+                     distance: segmentDistance,
+                     type: backtrackType,
+                     severity: this._calculateBacktrackSeverity(angleDiff, segmentDistance)
+                 });
              }
          }
          
@@ -909,6 +1173,49 @@ class Blucap {
              severity_score: this._calculateOverallBacktrackSeverity(backtrackSegments),
              total_points: coordinates.length
          };
+     }
+     
+     /**
+      * 验证微小回头路
+      * @param {Array} coordinates - 路径坐标数组
+      * @param {number} startIdx - 起始索引
+      * @param {number} endIdx - 结束索引
+      * @param {number} minDistance - 最小距离阈值
+      * @returns {boolean} 是否为微小回头路
+      */
+     _verifyMicroBacktrack(coordinates, startIdx, endIdx, minDistance) {
+         const segmentStart = coordinates[startIdx];
+         const segmentEnd = coordinates[endIdx];
+         
+         // 检查更小范围内的路径重叠
+         const checkRange = Math.min(5, Math.floor(coordinates.length * 0.05));
+         
+         // 计算当前段的中点
+         const midPoint = {
+             lat: (segmentStart.lat + segmentEnd.lat) / 2,
+             lng: (segmentStart.lng + segmentEnd.lng) / 2
+         };
+         
+         // 检查前后路径是否与当前段过于接近
+         for (let i = Math.max(0, startIdx - checkRange); i < startIdx; i++) {
+             const checkPoint = coordinates[i];
+             const distanceToMid = this._calculateDistance(checkPoint, midPoint);
+             
+             if (distanceToMid < minDistance * 0.3) {
+                 return true;
+             }
+         }
+         
+         for (let i = endIdx + 1; i < Math.min(coordinates.length, endIdx + checkRange); i++) {
+             const checkPoint = coordinates[i];
+             const distanceToMid = this._calculateDistance(checkPoint, midPoint);
+             
+             if (distanceToMid < minDistance * 0.3) {
+                 return true;
+             }
+         }
+         
+         return false;
      }
      
      /**
@@ -1082,12 +1389,12 @@ class Blucap {
        */
       _detectSharpCorners(coordinates) {
           const corners = [];
-          const minSegmentLength = 100; // 最小段长度(米)
+          const minSegmentLength = 50; // 降低最小段长度，提高敏感度
           
           for (let i = 1; i < coordinates.length - 1; i++) {
-              const prevPoint = coordinates[i - 1];
-              const currentPoint = coordinates[i];
-              const nextPoint = coordinates[i + 1];
+              const prevPoint = { lat: coordinates[i - 1][1], lng: coordinates[i - 1][0] };
+              const currentPoint = { lat: coordinates[i][1], lng: coordinates[i][0] };
+              const nextPoint = { lat: coordinates[i + 1][1], lng: coordinates[i + 1][0] };
               
               // 检查段长度
               const dist1 = this._calculateDistance(prevPoint, currentPoint);
@@ -1100,19 +1407,55 @@ class Blucap {
               // 计算转角
               const angle = this._calculateTurnAngle(prevPoint, currentPoint, nextPoint);
               
-              if (angle < 120) { // 小于120度认为是尖锐转角
+              // 多层次角度检测
+              let isSharpCorner = false;
+              let severity = 0;
+              
+              if (angle < 60) {
+                  // 极尖锐转角
+                  isSharpCorner = true;
+                  severity = 1.0;
+              } else if (angle < 90) {
+                  // 尖锐转角
+                  isSharpCorner = true;
+                  severity = 0.8;
+              } else if (angle < 120) {
+                  // 中等尖锐转角
+                  isSharpCorner = true;
+                  severity = 0.6;
+              } else if (angle < 140) {
+                  // 轻微尖锐转角
+                  isSharpCorner = true;
+                  severity = 0.4;
+              }
+              
+              if (isSharpCorner) {
                   corners.push({
                       index: i,
                       angle: angle,
-                      point: currentPoint,
-                      prev_point: prevPoint,
-                      next_point: nextPoint,
-                      severity: (120 - angle) / 120 // 严重程度 0-1
+                      point: coordinates[i],
+                      prev_point: coordinates[i - 1],
+                      next_point: coordinates[i + 1],
+                      severity: severity,
+                      category: this._categorizeCorner(angle)
                   });
               }
           }
           
           return corners;
+      }
+      
+      /**
+       * 分类转角类型
+       * @param {number} angle - 转角度数
+       * @returns {string} 转角类型
+       */
+      _categorizeCorner(angle) {
+          if (angle < 60) return 'extreme';
+          if (angle < 90) return 'sharp';
+          if (angle < 120) return 'moderate';
+          if (angle < 140) return 'mild';
+          return 'normal';
       }
       
       /**
@@ -1144,14 +1487,22 @@ class Blucap {
       _applyBezierSmoothing(coordinates, sharpCorners, intensity) {
           let smoothedCoords = [...coordinates];
           
+          // 按严重程度排序，优先处理最严重的转角
+          const sortedCorners = sharpCorners.sort((a, b) => b.severity - a.severity);
+          
           // 从后往前处理，避免索引偏移问题
-          for (let i = sharpCorners.length - 1; i >= 0; i--) {
-              const corner = sharpCorners[i];
-              const smoothedSegment = this._createBezierCurve(
+          for (let i = sortedCorners.length - 1; i >= 0; i--) {
+              const corner = sortedCorners[i];
+              
+              // 根据转角类型调整平滑参数
+              const adaptiveIntensity = this._getAdaptiveIntensity(corner, intensity);
+              
+              const smoothedSegment = this._createAdvancedBezierCurve(
                   corner.prev_point,
                   corner.point,
                   corner.next_point,
-                  intensity
+                  adaptiveIntensity,
+                  corner.category
               );
               
               // 替换尖锐转角点
@@ -1162,8 +1513,160 @@ class Blucap {
       }
       
       /**
-       * 执行多层次路径验证
-       * @param {Object} routeResult - 路线结果
+       * 获取自适应平滑强度
+       * @param {Object} corner - 转角信息
+       * @param {Object} baseIntensity - 基础强度参数
+       * @returns {Object} 自适应强度参数
+       */
+      _getAdaptiveIntensity(corner, baseIntensity) {
+          const severityMultiplier = {
+              'extreme': 1.5,
+              'sharp': 1.3,
+              'moderate': 1.1,
+              'mild': 0.9
+          };
+          
+          const multiplier = severityMultiplier[corner.category] || 1.0;
+          
+          return {
+              angle_threshold: baseIntensity.angle_threshold,
+              control_point_ratio: Math.min(0.6, baseIntensity.control_point_ratio * multiplier),
+              interpolation_points: Math.max(3, Math.floor(baseIntensity.interpolation_points * multiplier))
+          };
+      }
+      
+      /**
+       * 创建高级贝塞尔曲线
+       * @param {Array} p1 - 前一个点
+       * @param {Array} p2 - 当前点
+       * @param {Array} p3 - 下一个点
+       * @param {Object} intensity - 强度参数
+       * @param {string} category - 转角类型
+       * @returns {Array} 平滑后的点数组
+       */
+      _createAdvancedBezierCurve(p1, p2, p3, intensity, category) {
+          const points = [];
+          const numPoints = intensity.interpolation_points;
+          const controlRatio = intensity.control_point_ratio;
+          
+          // 转换为标准格式
+          const point1 = { lat: p1[1], lng: p1[0] };
+          const point2 = { lat: p2[1], lng: p2[0] };
+          const point3 = { lat: p3[1], lng: p3[0] };
+          
+          // 计算控制点
+          const dist1 = this._calculateDistance(point1, point2);
+          const dist2 = this._calculateDistance(point2, point3);
+          const avgDist = (dist1 + dist2) / 2;
+          
+          // 根据转角类型调整控制点策略
+          let controlPoints;
+          if (category === 'extreme' || category === 'sharp') {
+              // 对于极尖锐转角，使用双控制点策略
+              controlPoints = this._createDualControlPoints(point1, point2, point3, avgDist, controlRatio);
+          } else {
+              // 对于中等和轻微转角，使用单控制点策略
+              controlPoints = this._createSingleControlPoint(point1, point2, point3, avgDist, controlRatio);
+          }
+          
+          // 生成贝塞尔曲线点
+          if (controlPoints.length === 1) {
+              // 二次贝塞尔曲线
+              for (let i = 0; i <= numPoints; i++) {
+                  const t = i / numPoints;
+                  const bezierPoint = this._calculateQuadraticBezierPoint(
+                      [point1.lng, point1.lat],
+                      [controlPoints[0].lng, controlPoints[0].lat],
+                      [point3.lng, point3.lat],
+                      t
+                  );
+                  points.push(bezierPoint);
+              }
+          } else {
+              // 三次贝塞尔曲线
+              for (let i = 0; i <= numPoints; i++) {
+                  const t = i / numPoints;
+                  const bezierPoint = this._calculateCubicBezierPoint(
+                      [point1.lng, point1.lat],
+                      [controlPoints[0].lng, controlPoints[0].lat],
+                      [controlPoints[1].lng, controlPoints[1].lat],
+                      [point3.lng, point3.lat],
+                      t
+                  );
+                  points.push(bezierPoint);
+              }
+          }
+          
+          return points;
+      }
+      
+      /**
+        * 创建单控制点
+        * @param {Object} p1 - 前一个点
+        * @param {Object} p2 - 当前点
+        * @param {Object} p3 - 下一个点
+        * @param {number} avgDist - 平均距离
+        * @param {number} controlRatio - 控制点比例
+        * @returns {Array} 控制点数组
+        */
+       _createSingleControlPoint(p1, p2, p3, avgDist, controlRatio) {
+           const controlDist = avgDist * controlRatio;
+           const bearing1 = this._calculateBearing(p2, p1);
+           const bearing2 = this._calculateBearing(p2, p3);
+           const avgBearing = (bearing1 + bearing2) / 2;
+           
+           const controlPoint = this._calculatePointAtDistance(p2, controlDist, avgBearing);
+           return [controlPoint];
+       }
+       
+       /**
+        * 创建双控制点（用于极尖锐转角）
+        * @param {Object} p1 - 前一个点
+        * @param {Object} p2 - 当前点
+        * @param {Object} p3 - 下一个点
+        * @param {number} avgDist - 平均距离
+        * @param {number} controlRatio - 控制点比例
+        * @returns {Array} 控制点数组
+        */
+       _createDualControlPoints(p1, p2, p3, avgDist, controlRatio) {
+           const controlDist = avgDist * controlRatio;
+           
+           // 第一个控制点：朝向p1方向
+           const bearing1 = this._calculateBearing(p2, p1);
+           const control1 = this._calculatePointAtDistance(p2, controlDist * 0.7, bearing1);
+           
+           // 第二个控制点：朝向p3方向
+           const bearing2 = this._calculateBearing(p2, p3);
+           const control2 = this._calculatePointAtDistance(p2, controlDist * 0.7, bearing2);
+           
+           return [control1, control2];
+       }
+       
+       /**
+        * 计算三次贝塞尔曲线上的点
+        * @param {Array} p0 - 起点
+        * @param {Array} p1 - 第一个控制点
+        * @param {Array} p2 - 第二个控制点
+        * @param {Array} p3 - 终点
+        * @param {number} t - 参数 (0-1)
+        * @returns {Array} 贝塞尔曲线上的点
+        */
+       _calculateCubicBezierPoint(p0, p1, p2, p3, t) {
+           const u = 1 - t;
+           const tt = t * t;
+           const uu = u * u;
+           const uuu = uu * u;
+           const ttt = tt * t;
+           
+           const x = uuu * p0[0] + 3 * uu * t * p1[0] + 3 * u * tt * p2[0] + ttt * p3[0];
+           const y = uuu * p0[1] + 3 * uu * t * p1[1] + 3 * u * tt * p2[1] + ttt * p3[1];
+           
+           return [x, y];
+       }
+       
+       /**
+        * 执行多层次路径验证
+        * @param {Object} routeResult - 路线结果
        * @param {Object} validationParams - 验证参数
        * @returns {Object} 多层次验证结果
        */
@@ -1665,6 +2168,146 @@ class Blucap {
                sumLng / coordinates.length,
                sumLat / coordinates.length
            ];
+       }
+       
+       /**
+        * 计算路径的圆形度
+        * @param {Array} coordinates - 路径坐标数组
+        * @param {Array} center - 路径中心点 [lng, lat]
+        * @returns {number} 圆形度评分 (0-1)
+        */
+       _calculateCircularity(coordinates, center) {
+           if (!coordinates || coordinates.length < 3) return 0;
+           
+           const distances = coordinates.map(coord => {
+               const point = { lat: coord[1], lng: coord[0] };
+               const centerPoint = { lat: center[1], lng: center[0] };
+               return this._calculateDistance(centerPoint, point);
+           });
+           
+           const avgDistance = distances.reduce((sum, d) => sum + d, 0) / distances.length;
+           
+           // 计算距离的标准差
+           const variance = distances.reduce((sum, d) => sum + Math.pow(d - avgDistance, 2), 0) / distances.length;
+           const stdDev = Math.sqrt(variance);
+           
+           // 圆形度 = 1 - (标准差 / 平均距离)
+           return Math.max(0, 1 - (stdDev / avgDistance));
+       }
+       
+       /**
+        * 计算路径的对称性
+        * @param {Array} coordinates - 路径坐标数组
+        * @param {Array} center - 路径中心点 [lng, lat]
+        * @returns {number} 对称性评分 (0-1)
+        */
+       _calculatePathSymmetry(coordinates, center) {
+           if (!coordinates || coordinates.length < 4) return 0;
+           
+           const halfLength = Math.floor(coordinates.length / 2);
+           let symmetryScore = 0;
+           const centerPoint = { lat: center[1], lng: center[0] };
+           
+           for (let i = 0; i < halfLength; i++) {
+               const point1 = { lat: coordinates[i][1], lng: coordinates[i][0] };
+               const point2 = { lat: coordinates[coordinates.length - 1 - i][1], lng: coordinates[coordinates.length - 1 - i][0] };
+               
+               const dist1 = this._calculateDistance(centerPoint, point1);
+               const dist2 = this._calculateDistance(centerPoint, point2);
+               
+               const symmetryRatio = 1 - Math.abs(dist1 - dist2) / Math.max(dist1, dist2);
+               symmetryScore += symmetryRatio;
+           }
+           
+           return symmetryScore / halfLength;
+       }
+       
+       /**
+        * 计算路径的均匀性
+        * @param {Array} coordinates - 路径坐标数组
+        * @param {Array} center - 路径中心点 [lng, lat]
+        * @returns {number} 均匀性评分 (0-1)
+        */
+       _calculatePathUniformity(coordinates, center) {
+           if (!coordinates || coordinates.length < 3) return 0;
+           
+           const centerPoint = { lat: center[1], lng: center[0] };
+           const angles = [];
+           
+           for (let i = 0; i < coordinates.length; i++) {
+               const point = { lat: coordinates[i][1], lng: coordinates[i][0] };
+               const bearing = this._calculateBearing(centerPoint, point);
+               angles.push(bearing);
+           }
+           
+           // 计算相邻角度差
+           const angleDiffs = [];
+           for (let i = 0; i < angles.length; i++) {
+               const nextIndex = (i + 1) % angles.length;
+               let diff = Math.abs(angles[nextIndex] - angles[i]);
+               if (diff > 180) diff = 360 - diff;
+               angleDiffs.push(diff);
+           }
+           
+           const expectedAngleDiff = 360 / coordinates.length;
+           const avgDiff = angleDiffs.reduce((sum, d) => sum + Math.abs(d - expectedAngleDiff), 0) / angleDiffs.length;
+           
+           return Math.max(0, 1 - (avgDiff / expectedAngleDiff));
+       }
+       
+       /**
+        * 分析路径的凸性
+        * @param {Array} coordinates - 路径坐标数组
+        * @returns {number} 凸性评分 (0-1)
+        */
+       _analyzePathConvexity(coordinates) {
+           if (!coordinates || coordinates.length < 3) return 0;
+           
+           let convexPoints = 0;
+           const totalPoints = coordinates.length;
+           
+           for (let i = 0; i < totalPoints; i++) {
+               const prev = coordinates[(i - 1 + totalPoints) % totalPoints];
+               const curr = coordinates[i];
+               const next = coordinates[(i + 1) % totalPoints];
+               
+               // 计算叉积判断转向
+               const crossProduct = (next[0] - curr[0]) * (prev[1] - curr[1]) - (next[1] - curr[1]) * (prev[0] - curr[0]);
+               
+               if (crossProduct > 0) {
+                   convexPoints++;
+               }
+           }
+           
+           return convexPoints / totalPoints;
+       }
+       
+       /**
+        * 计算路径的紧凑度
+        * @param {Array} coordinates - 路径坐标数组
+        * @param {number} targetDistance - 目标距离
+        * @returns {number} 紧凑度评分 (0-1)
+        */
+       _calculatePathCompactness(coordinates, targetDistance) {
+           if (!coordinates || coordinates.length < 3) return 0;
+           
+           // 计算路径包围的近似面积（使用鞋带公式）
+           let area = 0;
+           for (let i = 0; i < coordinates.length; i++) {
+               const j = (i + 1) % coordinates.length;
+               area += coordinates[i][0] * coordinates[j][1];
+               area -= coordinates[j][0] * coordinates[i][1];
+           }
+           area = Math.abs(area) / 2;
+           
+           // 理想圆形的面积
+           const idealRadius = targetDistance / (2 * Math.PI);
+           const idealArea = Math.PI * idealRadius * idealRadius;
+           
+           // 紧凑度 = min(实际面积/理想面积, 理想面积/实际面积)
+           const compactnessRatio = area > 0 ? Math.min(area / idealArea, idealArea / area) : 0;
+           
+           return Math.max(0, Math.min(1, compactnessRatio));
        }
        
        /**
