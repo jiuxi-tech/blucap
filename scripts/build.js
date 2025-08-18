@@ -137,8 +137,8 @@ function buildProduction() {
     
     // 验证构建输出
     const outputFiles = [
-        'dist/fun-route-generator.min.js',
-        'dist/fun-route-generator.min.js.map'
+        'dist/blucap.min.js',
+        'dist/blucap.min.js.map'
     ];
     
     for (const file of outputFiles) {

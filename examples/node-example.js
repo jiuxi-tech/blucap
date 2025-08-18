@@ -150,7 +150,7 @@ async function example5_ErrorHandling() {
  * 主函数 - 运行所有示例
  */
 async function main() {
-  console.log('🚗 Blucap - Node.js 示例');
+  console.log('🏍️ Blucap - Node.js 示例');
   console.log('=====================================');
   
   if (API_KEY === 'your-graphhopper-api-key') {

@@ -81,22 +81,31 @@ class Blucap {
             throw new Error('GraphHopper API key is required');
         }
         
-        // 弯道等级配置
+        // 增强的弯道等级配置
         this.curveSettings = {
             "low": {
                 avoid_highways: false,
                 prefer_scenic: false,
-                detour_factor: 1.1
+                detour_factor: 1.1,
+                spiral_intensity: 0.3,
+                randomness_factor: 0.4,
+                min_segment_angle: 45
             },
             "medium": {
                 avoid_highways: true,
                 prefer_scenic: true,
-                detour_factor: 1.3
+                detour_factor: 1.3,
+                spiral_intensity: 0.6,
+                randomness_factor: 0.7,
+                min_segment_angle: 30
             },
             "high": {
                 avoid_highways: true,
                 prefer_scenic: true,
-                detour_factor: 1.6
+                detour_factor: 1.6,
+                spiral_intensity: 0.8,
+                randomness_factor: 1.0,
+                min_segment_angle: 20
             }
         };
     }
@@ -304,26 +313,99 @@ class Blucap {
     }
     
     /**
-     * 为环形路线生成中间点
+     * 为环形路线生成中间点（改进的螺旋式算法）
      */
     _generateIntermediatePoints(startPoint, targetDistance, curveLevel, startBearing) {
         const points = [];
-        const numPoints = curveLevel === "high" ? 3 : (curveLevel === "medium" ? 2 : 1);
-        const radiusKm = (targetDistance / 1000) / (2 * Math.PI); // 估算半径
+        const numPoints = this._calculateOptimalPointCount(targetDistance, curveLevel);
+        const baseRadius = this._calculateBaseRadius(targetDistance, curveLevel);
+        
+        // 确定螺旋方向（顺时针或逆时针）
+        const spiralDirection = this._determineSpiralDirection(startBearing);
         
         for (let i = 0; i < numPoints; i++) {
-            const angle = startBearing + (360 / numPoints) * (i + 1);
-            const point = this._calculatePointAtDistance(startPoint, radiusKm * 1000, angle);
+            const progress = (i + 1) / (numPoints + 1); // 避免最后一点过于接近起点
             
-            // 添加一些随机偏移来增加趣味性
-            const randomOffset = (Math.random() - 0.5) * 0.01; // 约1km的随机偏移
-            point[0] += randomOffset;
-            point[1] += randomOffset;
+            // 螺旋式半径分布，确保路径不重叠
+            const spiralRadius = this._calculateSpiralRadius(baseRadius, progress, curveLevel);
             
-            points.push(point);
+            // 改进的角度分布，避免均匀分布导致的单调性
+            const angle = this._calculateSpiralAngle(startBearing, progress, spiralDirection, curveLevel);
+            
+            const point = this._calculatePointAtDistance(startPoint, spiralRadius, angle);
+            
+            // 增强的随机偏移策略
+            const enhancedPoint = this._applyEnhancedOffset(point, spiralRadius, curveLevel, i);
+            
+            points.push(enhancedPoint);
         }
         
         return points;
+    }
+
+    /**
+     * 计算最优中间点数量
+     */
+    _calculateOptimalPointCount(targetDistance, curveLevel) {
+        const baseCount = curveLevel === "high" ? 4 : (curveLevel === "medium" ? 3 : 2);
+        const distanceFactor = Math.min(Math.max(targetDistance / 100000, 0.5), 2); // 50-200km范围调整
+        return Math.round(baseCount * distanceFactor);
+    }
+
+    /**
+     * 计算基础半径
+     */
+    _calculateBaseRadius(targetDistance, curveLevel) {
+        // 更保守的半径计算，避免路径过于紧密
+        const circumferenceFactor = curveLevel === "high" ? 3.5 : (curveLevel === "medium" ? 3.0 : 2.5);
+        return (targetDistance / 1000) / circumferenceFactor;
+    }
+
+    /**
+     * 确定螺旋方向
+     */
+    _determineSpiralDirection(startBearing) {
+        // 基于起始方向智能选择螺旋方向，避免不自然的路径
+        return (startBearing >= 0 && startBearing < 180) ? 1 : -1; // 1为顺时针，-1为逆时针
+    }
+
+    /**
+     * 计算螺旋式半径
+     */
+    _calculateSpiralRadius(baseRadius, progress, curveLevel) {
+        // 螺旋式半径分布，内圈到外圈渐进
+        const minRadius = baseRadius * 0.4;
+        const maxRadius = baseRadius * 1.2;
+        const spiralFactor = curveLevel === "high" ? 0.8 : (curveLevel === "medium" ? 0.6 : 0.4);
+        
+        return minRadius + (maxRadius - minRadius) * Math.pow(progress, spiralFactor);
+    }
+
+    /**
+     * 计算螺旋式角度
+     */
+    _calculateSpiralAngle(startBearing, progress, spiralDirection, curveLevel) {
+        // 非均匀角度分布，增加路径的自然性
+        const totalAngle = curveLevel === "high" ? 300 : (curveLevel === "medium" ? 270 : 240);
+        const angleVariation = (Math.sin(progress * Math.PI) * 30); // 正弦波动
+        
+        return startBearing + (spiralDirection * totalAngle * progress) + angleVariation;
+    }
+
+    /**
+     * 应用增强的随机偏移
+     */
+    _applyEnhancedOffset(point, radius, curveLevel, index) {
+        // 基于半径和弯道等级的智能偏移
+        const offsetMagnitude = Math.min(radius * 0.15, 5000); // 最大5km偏移
+        const offsetScale = curveLevel === "high" ? 1.0 : (curveLevel === "medium" ? 0.7 : 0.4);
+        
+        // 使用更自然的偏移模式
+        const offsetAngle = (index * 137.5) % 360; // 黄金角度分布
+        const offsetDistance = offsetMagnitude * offsetScale * (0.5 + Math.random() * 0.5);
+        
+        const offsetPoint = this._calculatePointAtDistance(point, offsetDistance, offsetAngle);
+        return offsetPoint;
     }
 
     /**
@@ -460,19 +542,19 @@ class Blucap {
     }
 
     /**
-     * 应用弯道设置到路线请求
+     * 应用弯道设置到路线请求（兼容免费套餐）
      */
     _applyCurveSettings(routeRequest, curveLevel) {
         const settings = this.curveSettings[curveLevel] || this.curveSettings["medium"];
         
-        // 使用免费API支持的基本参数
-        if (settings.avoid_highways) {
+        // 基础避让策略（免费套餐兼容）
+        if (settings.avoid_highways && curveLevel !== "low") {
             routeRequest.avoid = "motorway";
         }
         
-        // 设置路由类型偏好
+        // 基础路径权重策略
         if (settings.prefer_scenic) {
-            routeRequest.weighting = "shortest"; // 使用最短路径可能更有趣
+            routeRequest.weighting = "shortest";
         } else {
             routeRequest.weighting = "fastest";
         }
