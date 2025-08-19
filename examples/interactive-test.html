@@ -229,6 +229,39 @@
             <div id="statusResult" class="result" style="display: none;"></div>
         </div>
         
+        <!-- 闭合优化测试 -->
+        <div class="section">
+            <h2>🔄 闭合优化测试</h2>
+            <p>测试渐进式闭合优化功能，查看优化过程和效果</p>
+            <div class="form-group">
+                <label for="closureOptLat">起点纬度:</label>
+                <input type="number" id="closureOptLat" value="39.9042" step="0.0001">
+            </div>
+            <div class="form-group">
+                <label for="closureOptLng">起点经度:</label>
+                <input type="number" id="closureOptLng" value="116.4074" step="0.0001">
+            </div>
+            <div class="form-group">
+                <label for="closureOptDistance">目标距离 (公里):</label>
+                <input type="number" id="closureOptDistance" value="8" min="3" max="50">
+            </div>
+            <div class="form-group">
+                <label for="closureOptCurve">弯道等级:</label>
+                <select id="closureOptCurve">
+                    <option value="low">低</option>
+                    <option value="medium" selected>中</option>
+                    <option value="high">高</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label for="enableProgressiveOpt">启用渐进式优化:</label>
+                <input type="checkbox" id="enableProgressiveOpt" checked>
+            </div>
+            <button onclick="testClosureOptimization()">测试闭合优化</button>
+            <button onclick="testClosureOptimizationComparison()">对比测试</button>
+            <div id="closureOptResult" class="result" style="display: none;"></div>
+        </div>
+        
         <!-- 地图显示 -->
         <div class="section map-section">
             <h2>🗺️ 交互式地图</h2>
@@ -277,7 +310,7 @@
     <script>
         // 动态加载库文件以避免缓存
         const script = document.createElement('script');
-        script.src = '../blucap.js';
+        script.src = '/blucap.js';
         document.head.appendChild(script);
     </script>
     
@@ -828,6 +861,54 @@
                 qualityHtml += '</div>';
             }
             
+            // 渐进式闭合优化信息
+            if (routeInfo.progressive_closure_optimization) {
+                const pco = routeInfo.progressive_closure_optimization;
+                qualityHtml += '<div style="margin: 20px 0; padding: 15px; background-color: #e8f5e8; border-radius: 8px; border-left: 4px solid #28a745;">';
+                qualityHtml += '<h4 style="margin: 0 0 10px 0; color: #28a745;">🔄 渐进式闭合优化</h4>';
+                
+                qualityHtml += `<div style="margin-bottom: 10px;"><strong>优化状态:</strong> ${pco.applied ? '✅ 已应用' : '❌ 未应用'}</div>`;
+                
+                if (pco.applied) {
+                    qualityHtml += `<div style="margin-bottom: 8px;"><strong>迭代轮次:</strong> ${pco.iterations_performed}</div>`;
+                    qualityHtml += `<div style="margin-bottom: 8px;"><strong>收敛状态:</strong> ${pco.converged ? '✅ 已收敛' : '⚠️ 未完全收敛'}</div>`;
+                    qualityHtml += `<div style="margin-bottom: 8px;"><strong>质量提升:</strong> ${(pco.quality_improvement * 100).toFixed(1)}%</div>`;
+                    
+                    if (pco.iteration_details && pco.iteration_details.length > 0) {
+                        qualityHtml += '<div style="margin: 10px 0;"><strong>迭代详情:</strong></div>';
+                        qualityHtml += '<div style="margin-left: 15px; font-size: 12px;">';
+                        pco.iteration_details.forEach((detail, index) => {
+                            qualityHtml += `• 第${index + 1}轮: ${detail.strategy} 策略, 质量评分 ${(detail.quality_score * 100).toFixed(1)}%<br>`;
+                        });
+                        qualityHtml += '</div>';
+                    }
+                    
+                    if (pco.convergence_analysis) {
+                        const analysis = pco.convergence_analysis;
+                        qualityHtml += '<div style="margin: 10px 0;"><strong>收敛分析:</strong></div>';
+                        qualityHtml += '<div style="margin-left: 15px; font-size: 12px;">';
+                        qualityHtml += `• 趋势: ${analysis.trend}<br>`;
+                        qualityHtml += `• 方差: ${analysis.variance.toFixed(4)}<br>`;
+                        qualityHtml += `• 稳定性: ${analysis.stability}<br>`;
+                        qualityHtml += '</div>';
+                    }
+                    
+                    if (pco.optimization_report) {
+                        const report = pco.optimization_report;
+                        qualityHtml += '<div style="margin: 10px 0;"><strong>优化报告:</strong></div>';
+                        qualityHtml += '<div style="margin-left: 15px; font-size: 12px;">';
+                        qualityHtml += `• 最佳策略: ${report.best_strategy}<br>`;
+                        qualityHtml += `• 策略效果: ${report.strategy_effectiveness}<br>`;
+                        if (report.recommendations && report.recommendations.length > 0) {
+                            qualityHtml += '• 建议: ' + report.recommendations.join(', ') + '<br>';
+                        }
+                        qualityHtml += '</div>';
+                    }
+                }
+                
+                qualityHtml += '</div>';
+            }
+            
             // 环形闭合验证
             if (routeInfo.closure_validation) {
                 const validation = routeInfo.closure_validation;
@@ -929,6 +1010,207 @@
                 case 'D': return '#f97316'; // 橙色
                 case 'F': return '#dc2626'; // 红色
                 default: return '#6b7280'; // 灰色
+            }
+        }
+        
+        // 闭合优化测试函数
+        async function testClosureOptimization() {
+            if (!funRouteGenerator) {
+                showResult('closureOptResult', '请先设置 API Key', 'error');
+                return;
+            }
+            
+            const lat = parseFloat(document.getElementById('closureOptLat').value);
+            const lng = parseFloat(document.getElementById('closureOptLng').value);
+            const distance = parseInt(document.getElementById('closureOptDistance').value);
+            const curveLevel = document.getElementById('closureOptCurve').value;
+            const enableProgressive = document.getElementById('enableProgressiveOpt').checked;
+            
+            if (isNaN(lat) || isNaN(lng) || isNaN(distance)) {
+                showResult('closureOptResult', '请输入有效的坐标和距离', 'error');
+                return;
+            }
+            
+            showResult('closureOptResult', '正在测试闭合优化功能...', 'loading');
+            
+            try {
+                console.log('开始闭合优化测试...');
+                console.log('参数:', { lat, lng, distance, curveLevel, enableProgressive });
+                
+                const params = {
+                    start_point: [lng, lat], // [lng, lat] 格式
+                    target_distance: distance * 1000, // 转换为米
+                    curve_level: curveLevel,
+                    route_type: "roundtrip",
+                    start_bearing: 0,
+                    enable_progressive_optimization: enableProgressive
+                };
+                
+                const result = await funRouteGenerator.generateFunRoute(params);
+                
+                console.log('闭合优化测试成功:', result);
+                
+                let output = '🎉 闭合优化测试完成!\n\n';
+                
+                if (result.route_info) {
+                    const info = result.route_info;
+                    output += `路线信息:\n`;
+                    output += `- 目标距离: ${(info.target_distance/1000).toFixed(1)} km\n`;
+                    output += `- 实际距离: ${(info.actual_distance/1000).toFixed(1)} km\n`;
+                    output += `- 弯道等级: ${info.curve_level}\n\n`;
+                    
+                    // 闭合验证结果
+                    if (info.closure_validation) {
+                        const validation = info.closure_validation;
+                        output += `闭合验证结果:\n`;
+                        output += `- 闭合状态: ${validation.is_closed ? '✅ 已闭合' : '❌ 未闭合'}\n`;
+                        output += `- 闭合距离: ${validation.closure_distance.toFixed(1)} 米\n`;
+                        output += `- 质量等级: ${validation.quality_grade}\n\n`;
+                    }
+                    
+                    // 渐进式优化结果
+                    if (info.progressive_closure_optimization) {
+                        const pco = info.progressive_closure_optimization;
+                        output += `渐进式闭合优化:\n`;
+                        output += `- 优化状态: ${pco.applied ? '✅ 已应用' : '❌ 未应用'}\n`;
+                        if (pco.applied) {
+                            output += `- 迭代轮次: ${pco.iterations_performed}\n`;
+                            output += `- 收敛状态: ${pco.converged ? '✅ 已收敛' : '⚠️ 未完全收敛'}\n`;
+                            output += `- 质量提升: ${(pco.quality_improvement * 100).toFixed(1)}%\n`;
+                            
+                            if (pco.iteration_details && pco.iteration_details.length > 0) {
+                                output += `\n迭代详情:\n`;
+                                pco.iteration_details.forEach((detail, index) => {
+                                    output += `  第${index + 1}轮: ${detail.strategy} 策略, 质量评分 ${(detail.quality_score * 100).toFixed(1)}%\n`;
+                                });
+                            }
+                        }
+                        output += '\n';
+                    }
+                    
+                    // 质量评分
+                    if (info.quality_score) {
+                        const score = info.quality_score;
+                        output += `质量评分:\n`;
+                        output += `- 总体评分: ${(score.overall_score * 100).toFixed(1)}% (${score.overall_grade})\n`;
+                        if (score.base_scores) {
+                            output += `- 环形闭合: ${(score.base_scores.closure_quality * 100).toFixed(1)}%\n`;
+                            output += `- 折返避免: ${(score.base_scores.backtrack_avoidance * 100).toFixed(1)}%\n`;
+                        }
+                    }
+                }
+                
+                showResult('closureOptResult', output, 'success');
+                
+            } catch (error) {
+                console.error('闭合优化测试错误:', error);
+                showResult('closureOptResult', `❌ 测试失败: ${error.message}`, 'error');
+            }
+        }
+        
+        // 闭合优化对比测试
+        async function testClosureOptimizationComparison() {
+            if (!funRouteGenerator) {
+                showResult('closureOptResult', '请先设置 API Key', 'error');
+                return;
+            }
+            
+            const lat = parseFloat(document.getElementById('closureOptLat').value);
+            const lng = parseFloat(document.getElementById('closureOptLng').value);
+            const distance = parseInt(document.getElementById('closureOptDistance').value);
+            const curveLevel = document.getElementById('closureOptCurve').value;
+            
+            if (isNaN(lat) || isNaN(lng) || isNaN(distance)) {
+                showResult('closureOptResult', '请输入有效的坐标和距离', 'error');
+                return;
+            }
+            
+            showResult('closureOptResult', '正在进行对比测试...', 'loading');
+            
+            try {
+                console.log('开始闭合优化对比测试...');
+                
+                const baseParams = {
+                    start_point: [lng, lat],
+                    target_distance: distance * 1000,
+                    curve_level: curveLevel,
+                    route_type: "roundtrip",
+                    start_bearing: 0
+                };
+                
+                // 测试1: 不启用渐进式优化
+                const resultWithoutOpt = await funRouteGenerator.generateFunRoute({
+                    ...baseParams,
+                    enable_progressive_optimization: false
+                });
+                
+                // 测试2: 启用渐进式优化
+                const resultWithOpt = await funRouteGenerator.generateFunRoute({
+                    ...baseParams,
+                    enable_progressive_optimization: true
+                });
+                
+                console.log('对比测试完成:', { resultWithoutOpt, resultWithOpt });
+                
+                let output = '🔍 闭合优化对比测试结果\n\n';
+                
+                // 对比结果
+                output += '=== 未启用渐进式优化 ===\n';
+                if (resultWithoutOpt.route_info) {
+                    const info1 = resultWithoutOpt.route_info;
+                    if (info1.closure_validation) {
+                        output += `闭合距离: ${info1.closure_validation.closure_distance.toFixed(1)} 米\n`;
+                        output += `闭合状态: ${info1.closure_validation.is_closed ? '✅ 已闭合' : '❌ 未闭合'}\n`;
+                    }
+                    if (info1.quality_score) {
+                        output += `总体评分: ${(info1.quality_score.overall_score * 100).toFixed(1)}%\n`;
+                        if (info1.quality_score.base_scores) {
+                            output += `闭合质量: ${(info1.quality_score.base_scores.closure_quality * 100).toFixed(1)}%\n`;
+                        }
+                    }
+                }
+                
+                output += '\n=== 启用渐进式优化 ===\n';
+                if (resultWithOpt.route_info) {
+                    const info2 = resultWithOpt.route_info;
+                    if (info2.closure_validation) {
+                        output += `闭合距离: ${info2.closure_validation.closure_distance.toFixed(1)} 米\n`;
+                        output += `闭合状态: ${info2.closure_validation.is_closed ? '✅ 已闭合' : '❌ 未闭合'}\n`;
+                    }
+                    if (info2.quality_score) {
+                        output += `总体评分: ${(info2.quality_score.overall_score * 100).toFixed(1)}%\n`;
+                        if (info2.quality_score.base_scores) {
+                            output += `闭合质量: ${(info2.quality_score.base_scores.closure_quality * 100).toFixed(1)}%\n`;
+                        }
+                    }
+                    
+                    if (info2.progressive_closure_optimization && info2.progressive_closure_optimization.applied) {
+                        const pco = info2.progressive_closure_optimization;
+                        output += `\n渐进式优化效果:\n`;
+                        output += `- 迭代轮次: ${pco.iterations_performed}\n`;
+                        output += `- 质量提升: ${(pco.quality_improvement * 100).toFixed(1)}%\n`;
+                        output += `- 收敛状态: ${pco.converged ? '✅ 已收敛' : '⚠️ 未完全收敛'}\n`;
+                    }
+                }
+                
+                // 计算改进效果
+                if (resultWithoutOpt.route_info && resultWithOpt.route_info) {
+                    const closure1 = resultWithoutOpt.route_info.closure_validation?.closure_distance || 0;
+                    const closure2 = resultWithOpt.route_info.closure_validation?.closure_distance || 0;
+                    const score1 = resultWithoutOpt.route_info.quality_score?.overall_score || 0;
+                    const score2 = resultWithOpt.route_info.quality_score?.overall_score || 0;
+                    
+                    output += '\n=== 改进效果 ===\n';
+                    output += `闭合距离改进: ${(closure1 - closure2).toFixed(1)} 米\n`;
+                    output += `质量评分提升: ${((score2 - score1) * 100).toFixed(1)}%\n`;
+                    output += `优化效果: ${closure2 < closure1 && score2 > score1 ? '✅ 显著改进' : '⚠️ 效果有限'}\n`;
+                }
+                
+                showResult('closureOptResult', output, 'success');
+                
+            } catch (error) {
+                console.error('对比测试错误:', error);
+                showResult('closureOptResult', `❌ 对比测试失败: ${error.message}`, 'error');
             }
         }
     </script>
