@@ -117,6 +117,8 @@ const utils = {
      * @returns {number} 高精度距离（米）
      */
     _calculateHighPrecisionDistance(point1, point2, useCache = true) {
+
+        
         const [lng1, lat1] = point1;
         const [lng2, lat2] = point2;
         
@@ -3851,6 +3853,8 @@ class Blucap {
         const routeStart = coordinates[0];
         const routeEnd = coordinates[coordinates.length - 1];
         
+
+        
         // 增强的闭合距离计算 - 使用多重验证算法
         const closureAnalysis = this._performEnhancedClosureAnalysis({
             routeStart,
@@ -3859,6 +3863,8 @@ class Blucap {
             coordinates,
             targetDistance
         });
+        
+        console.log('closureAnalysis.primary_closure_distance:', closureAnalysis.primary_closure_distance);
         
         // 动态计算最大可接受距离 - 更严格的标准
         const maxAcceptableDistance = utils._calculateDynamicClosureThreshold(targetDistance);
@@ -4129,20 +4135,24 @@ class Blucap {
     _performEnhancedClosureAnalysis(params) {
         const { routeStart, routeEnd, startPoint, coordinates, targetDistance } = params;
         
+        // 坐标格式转换：startPoint是[lat,lng]，routeEnd是[lng,lat]
+        // 需要将startPoint转换为[lng,lat]格式以保持一致
+        const startPointConverted = [startPoint[1], startPoint[0]]; // [lat,lng] -> [lng,lat]
+        
         // 主要闭合距离计算（高精度）- 计算路径终点与原始起始点的距离
-        const primaryClosureDistance = utils._calculateHighPrecisionDistance(routeEnd, startPoint);
+        const primaryClosureDistance = utils._calculateHighPrecisionDistance(routeEnd, startPointConverted);
         
         // 多点闭合验证 - 检查路径末端多个点的闭合情况
-        const multiPointAnalysis = this._analyzeMultiPointClosure(coordinates, startPoint, targetDistance);
+        const multiPointAnalysis = this._analyzeMultiPointClosure(coordinates, startPointConverted, targetDistance);
         
         // 路径方向一致性检查
-        const directionConsistency = this._validateClosureDirection(coordinates, startPoint);
+        const directionConsistency = this._validateClosureDirection(coordinates, startPointConverted);
         
         // 闭合路径的几何稳定性分析
         const geometricStability = this._analyzeClosureStability(coordinates, routeStart, routeEnd, targetDistance);
         
         // 渐进式闭合质量评估
-        const progressiveClosure = this._evaluateProgressiveClosure(coordinates, startPoint);
+        const progressiveClosure = this._evaluateProgressiveClosure(coordinates, startPointConverted);
         
         // 闭合精度等级评估
         const precisionGrade = this._calculateClosurePrecisionGrade({
