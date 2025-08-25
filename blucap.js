@@ -2130,11 +2130,30 @@ class Blucap {
         // 如果闭合验证失败，尝试优化闭合
         if (!validationResult.is_closed || validationResult.closure_distance > 100) {
             try {
-                const optimizedResult = await this._optimizeCircularClosure(routeRequest, startPoint, targetDistance, curveLevel, enableProgressiveOptimization);
+                // 重新生成优化的中间点
+                const optimizedPoints = this._generateIntermediatePoints(
+                    startPoint, 
+                    targetDistance, 
+                    curveLevel,
+                    startBearing
+                );
+                
+                // 构建优化的路线点数组
+                const maxOptimizedPoints = Math.min(optimizedPoints.length, 3);
+                const limitedOptimizedPoints = optimizedPoints.slice(0, maxOptimizedPoints);
+                const optimizedRoutePoints = [startPoint, ...limitedOptimizedPoints, startPoint];
+                
+                // 请求优化的路线
+                const optimizedResult = await this._requestRoute(optimizedRoutePoints, curveLevel);
+                
                 if (optimizedResult && optimizedResult.paths && optimizedResult.paths.length > 0) {
-                    // 使用优化后的结果
-                    Object.assign(result, optimizedResult);
-                    validationResult = this._validateCircularClosure(result, startPoint, targetDistance);
+                    const optimizedValidation = this._validateCircularClosure(optimizedResult, startPoint, targetDistance);
+                    // 如果优化结果更好，使用优化后的结果
+                    if (optimizedValidation.closure_distance < validationResult.closure_distance) {
+                        Object.assign(result, optimizedResult);
+                        validationResult = optimizedValidation;
+                        console.log(`闭合优化成功，闭合距离从 ${validationResult.closure_distance.toFixed(1)}米 改善到 ${optimizedValidation.closure_distance.toFixed(1)}米`);
+                    }
                 }
             } catch (error) {
                 console.warn('闭合优化失败，使用原始路线:', error.message);
@@ -3582,6 +3601,11 @@ class Blucap {
         const url = `${this.config.host}/route?key=${this.config.apiKey}`;
         const maxRetries = 3;
         const baseDelay = 1000; // 1秒基础延迟
+        
+        // 添加调试日志
+        if (retryCount === 0) {
+            console.log('GraphHopper API 请求参数:', JSON.stringify(routeRequest, null, 2));
+        }
         
         try {
             const response = await httpClient.post(url, routeRequest, {
@@ -7335,16 +7359,25 @@ class Blucap {
            const maxIntermediatePoints = Math.min(adjustedIntermediatePoints.length, 3);
            const limitedIntermediatePoints = adjustedIntermediatePoints.slice(0, maxIntermediatePoints);
            
+           // 确保坐标格式正确：转换为 [lng, lat] 格式
+           const convertedPoints = [start_point, ...limitedIntermediatePoints, start_point].map(point => {
+               // 检查坐标格式并转换
+               if (Array.isArray(point)) {
+                   return [point[1], point[0]]; // [lat, lng] -> [lng, lat]
+               } else if (point.lat !== undefined && point.lng !== undefined) {
+                   return [point.lng, point.lat]; // {lat, lng} -> [lng, lat]
+               } else {
+                   return point; // 已经是正确格式
+               }
+           });
+           
            const routeRequest = {
-               points: [start_point, ...limitedIntermediatePoints, start_point],
-               vehicle: "foot",
-               locale: "zh_CN",
-               optimize: "false",
+               points: convertedPoints,
+               profile: "car", // 使用 profile 而不是 vehicle
+               locale: "en", // 使用英文以保持一致性
                instructions: true,
-               calc_points: true,
-               debug: false,
-               elevation: this.elevation,
-               points_encoded: false
+               points_encoded: true, // 使用编码格式以提高性能
+               elevation: this.elevation || false
            };
            
            // 应用弯道设置
