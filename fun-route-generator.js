@@ -63,7 +63,7 @@ class FunRouteGenerator {
             points_encoded: options.points_encoded !== false,
             elevation: options.elevation || false,
             // 趣味路线特有参数
-            distance_range: [50000, 500000], // 50km - 500km (单位：米)
+            distance_range: [1000, 1000000], // 1km - 1000km (单位：米)
             curve_level: "medium", // 弯道等级: "low", "medium", "high"
             route_type: "roundtrip", // "roundtrip" 或 "point_to_point"
             ...options
@@ -125,8 +125,8 @@ class FunRouteGenerator {
             throw new Error("点对点路线需要提供终点");
         }
         
-        if (params.target_distance < 50000 || params.target_distance > 500000) {
-            throw new Error("目标距离必须在50-500km之间");
+        if (params.target_distance < 1000 || params.target_distance > 1000000) {
+            throw new Error("目标距离必须在1-1000km之间");
         }
         
         if (params.route_type === "roundtrip") {
@@ -152,8 +152,8 @@ class FunRouteGenerator {
             throw new Error('startPoint must be an array of [lat, lng]');
         }
         
-        if (!distance || distance < 50 || distance > 500) {
-            throw new Error('distance must be between 50 and 500 km');
+        if (!distance || distance < 1 || distance > 1000) {
+            throw new Error('distance must be between 1 and 1000 km');
         }
 
         // 转换为新API格式
@@ -190,8 +190,8 @@ class FunRouteGenerator {
         
         // 如果指定了目标距离，添加绕行点
         if (targetDistance) {
-            if (targetDistance < 50 || targetDistance > 500) {
-                throw new Error('targetDistance must be between 50 and 500 km');
+            if (targetDistance < 1 || targetDistance > 1000) {
+        throw new Error('targetDistance must be between 1 and 1000 km');
             }
             
             const detourPoints = this._generateDetourPoints(

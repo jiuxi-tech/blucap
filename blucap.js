@@ -1942,7 +1942,7 @@ class Blucap {
             points_encoded: options.points_encoded !== false,
             elevation: options.elevation || false,
             // 趣味路线特有参数
-            distance_range: [50000, 500000], // 50km - 500km (单位：米)
+            distance_range: [1000, 1000000], // 1km - 1000km (单位：米)
             curve_level: "medium", // 弯道等级: "low", "medium", "high"
             route_type: "roundtrip", // "roundtrip" 或 "point_to_point"
             ...options
@@ -2013,8 +2013,8 @@ class Blucap {
             throw new Error("点对点路线需要提供终点");
         }
         
-        if (params.target_distance < 50000 || params.target_distance > 500000) {
-            throw new Error("目标距离必须在50-500km之间");
+        if (params.target_distance < 1000 || params.target_distance > 1000000) {
+            throw new Error("目标距离必须在1-1000km之间");
         }
         
         if (params.route_type === "roundtrip") {
@@ -2040,8 +2040,8 @@ class Blucap {
             throw new Error('startPoint must be an array of [lat, lng]');
         }
         
-        if (!distance || distance < 50 || distance > 500) {
-            throw new Error('distance must be between 50 and 500 km');
+        if (!distance || distance < 1 || distance > 1000) {
+            throw new Error('distance must be between 1 and 1000 km');
         }
 
         // 转换为新API格式
@@ -2078,8 +2078,8 @@ class Blucap {
         
         // 如果指定了目标距离，添加绕行点
         if (targetDistance) {
-            if (targetDistance < 50 || targetDistance > 500) {
-                throw new Error('targetDistance must be between 50 and 500 km');
+            if (targetDistance < 1 || targetDistance > 1000) {
+            throw new Error('targetDistance must be between 1 and 1000 km');
             }
             
             const detourPoints = this._generateDetourPoints(
@@ -2109,19 +2109,54 @@ class Blucap {
             startBearing
         );
         
-        // 应用防回头路优化到中间点生成
-        intermediatePoints = this._optimizeIntermediatePointsForBacktrackPrevention(
-            intermediatePoints,
-            startPoint,
-            targetDistance,
+        // 验证中间点生成是否成功
+        if (!intermediatePoints || !Array.isArray(intermediatePoints) || intermediatePoints.length === 0) {
+            console.error('中间点生成失败，尝试使用备用策略');
+            // 使用备用策略重新生成
+            intermediatePoints = this._generateFallbackIntermediatePoints(startPoint, targetDistance, curveLevel);
+        }
+        
+        // 构建真正的环形路线点数组
+        // 策略：生成环形分布的中间点，最后一个点要接近起点以形成闭合
+        // GraphHopper Basic计划支持最多30个位置点，根据距离动态调整中间点数量以提高路线质量
+        const maxIntermediatePoints = Math.min(intermediatePoints.length, Math.min(8, Math.max(3, Math.floor(targetDistance / 2000))));
+        const limitedIntermediatePoints = intermediatePoints.slice(0, maxIntermediatePoints);
+        
+        // 验证中间点的有效性
+        const validIntermediatePoints = limitedIntermediatePoints.filter(point => {
+            return point && 
+                   Array.isArray(point) && 
+                   point.length >= 2 && 
+                   !isNaN(point[0]) && 
+                   !isNaN(point[1]) &&
+                   Math.abs(point[0]) <= 90 && 
+                   Math.abs(point[1]) <= 180;
+        });
+        
+        // 确保至少有一个有效的中间点
+        if (validIntermediatePoints.length === 0) {
+            throw new Error('无法生成有效的中间点，请检查起始坐标和目标距离');
+        }
+        
+        // 计算最后一个中间点，使其更接近起点以优化闭合
+        const lastIntermediatePoint = this._calculateClosureOptimizedPoint(
+            startPoint, 
+            validIntermediatePoints[validIntermediatePoints.length - 1], 
+            targetDistance, 
             curveLevel
         );
         
-        // 构建路线点数组 (起点 -> 中间点们 -> 起点)
-        // GraphHopper API限制：最多5个点（包括起点和终点）
-        const maxIntermediatePoints = Math.min(intermediatePoints.length, 3);
-        const limitedIntermediatePoints = intermediatePoints.slice(0, maxIntermediatePoints);
-        const routePoints = [startPoint, ...limitedIntermediatePoints, startPoint];
+        // 替换最后一个中间点为优化后的闭合点
+        if (validIntermediatePoints.length > 0) {
+            validIntermediatePoints[validIntermediatePoints.length - 1] = lastIntermediatePoint;
+        }
+        
+        // 构建路线：起点 -> 中间点们 -> 起点（但不重复添加起点）
+        const routePoints = [startPoint, ...validIntermediatePoints, startPoint];
+        
+        // 添加调试日志
+        console.log(`构建路线点数量: ${routePoints.length}, 中间点数量: ${validIntermediatePoints.length}`);
+        console.log('路线点坐标:', routePoints.map(p => `[${p[0].toFixed(6)}, ${p[1].toFixed(6)}]`).join(' -> '));
         
         // 使用_requestRoute来处理坐标转换和请求构建
         const result = await this._requestRoute(routePoints, curveLevel);
@@ -2140,9 +2175,22 @@ class Blucap {
                     startBearing
                 );
                 
-                // 构建优化的路线点数组
+                // 构建优化的环形路线点数组
                 const maxOptimizedPoints = Math.min(optimizedPoints.length, 3);
                 const limitedOptimizedPoints = optimizedPoints.slice(0, maxOptimizedPoints);
+                
+                // 优化最后一个点以改善闭合
+                const optimizedLastPoint = this._calculateClosureOptimizedPoint(
+                    startPoint, 
+                    limitedOptimizedPoints[limitedOptimizedPoints.length - 1], 
+                    targetDistance, 
+                    curveLevel
+                );
+                
+                if (limitedOptimizedPoints.length > 0) {
+                    limitedOptimizedPoints[limitedOptimizedPoints.length - 1] = optimizedLastPoint;
+                }
+                
                 const optimizedRoutePoints = [startPoint, ...limitedOptimizedPoints, startPoint];
                 
                 // 请求优化的路线
@@ -3014,59 +3062,203 @@ class Blucap {
         const numPoints = this._calculateOptimalPointCount(targetDistance, curveLevel);
         const baseRadius = this._calculateBaseRadius(targetDistance, curveLevel);
         
-        // 使用改进的自然角度分布策略
+        // 改进的角度分布策略 - 确保均匀分布且避免重复路径
         const startAngle = startBearing || 0;
-        const angleDistribution = this._calculateNaturalAngleDistribution(numPoints, curveLevel);
+        const angleStep = 360 / (numPoints + 1); // +1 确保不会回到起点角度
         
-        // 防回头路参数
-        const minAngleStep = this._calculateMinAngleStep(curveLevel);
-        const maxAngleChange = this._calculateMaxAngleChange(curveLevel);
-        let previousAngle = startAngle;
+        // 根据弯道等级调整分布策略
+        const curveFactors = {
+            'low': { radiusVariation: 0.15, angleOffset: 10, minAngleStep: 45 },
+            'medium': { radiusVariation: 0.25, angleOffset: 20, minAngleStep: 60 },
+            'high': { radiusVariation: 0.35, angleOffset: 30, minAngleStep: 90 }
+        };
+        
+        const factor = curveFactors[curveLevel] || curveFactors['medium'];
+        let lastAngle = startAngle;
         
         for (let i = 0; i < numPoints; i++) {
-            // 计算当前点的角度（自然分布）
-            let currentAngle = startAngle + angleDistribution[i];
+            // 计算均匀分布的角度，添加适当偏移避免过于规则
+            const baseAngle = startAngle + (i + 1) * angleStep;
+            const angleVariation = (Math.random() - 0.5) * factor.angleOffset;
+            let currentAngle = (baseAngle + angleVariation) % 360;
             
-            // 防回头路验证和调整
-            if (i > 0) {
-                currentAngle = this._validateAndAdjustAngle(
-                    currentAngle, previousAngle, minAngleStep, maxAngleChange, i, numPoints
-                );
+            // 防回头路逻辑：确保角度变化足够大，避免折返
+            const angleDiff = Math.abs(currentAngle - lastAngle);
+            const normalizedAngleDiff = Math.min(angleDiff, 360 - angleDiff);
+            
+            if (normalizedAngleDiff < factor.minAngleStep) {
+                // 如果角度变化太小，强制增加角度差
+                const direction = Math.random() > 0.5 ? 1 : -1;
+                currentAngle = (lastAngle + direction * factor.minAngleStep) % 360;
+                if (currentAngle < 0) currentAngle += 360;
             }
             
-            // 使用多层半径策略，创建更自然的环形
-            const radiusVariation = this._calculateCircularRadius(baseRadius, i, numPoints, curveLevel);
+            // 计算半径，添加变化以创建更自然的形状
+            const radiusVariation = 1 + (Math.random() - 0.5) * factor.radiusVariation;
+            const currentRadius = baseRadius * radiusVariation;
             
-            // 计算基础圆周点
-            const circularPoint = this._calculatePointAtDistance(startPoint, radiusVariation, currentAngle);
+            // 确保半径不会太小或太大
+            // targetDistance 已经是米，无需转换
+            // 添加绝对最大半径限制，防止生成过远的坐标
+            const clampedRadius = Math.max(
+                targetDistance * 0.05, // 最小半径为目标距离的5%
+                Math.min(currentRadius, Math.min(targetDistance * 0.15, 15000)) // 最大半径限制为15km
+            );
             
-            // 应用智能偏移，避免过于规则的圆形
-            const enhancedPoint = this._applyCircularOffset(circularPoint, radiusVariation, curveLevel, i, currentAngle);
+            // 计算中间点位置
+            const intermediatePoint = this._calculatePointAtDistance(startPoint, clampedRadius, currentAngle);
             
-            // 验证点的方向连续性
-            if (points.length > 0) {
-                const isValidDirection = this._validateDirectionContinuity(
-                    points[points.length - 1], enhancedPoint, startPoint, previousAngle, currentAngle
-                );
-                
-                if (!isValidDirection) {
-                    // 重新调整点位置
-                    const adjustedPoint = this._adjustPointForContinuity(
-                        enhancedPoint, points[points.length - 1], startPoint, currentAngle
-                    );
-                    points.push(adjustedPoint);
-                } else {
-                    points.push(enhancedPoint);
-                }
+            // 验证点与起点和前一个点的距离，避免过近，同时检查是否会造成回头路
+            if (this._isValidIntermediatePoint(intermediatePoint, startPoint, points, targetDistance) &&
+                this._isNonBacktrackingPoint(intermediatePoint, startPoint, points)) {
+                points.push(intermediatePoint);
+                lastAngle = currentAngle;
             } else {
-                points.push(enhancedPoint);
+                // 如果点无效，尝试多次调整角度重新生成
+                let validPointFound = false;
+                for (let attempt = 0; attempt < 3; attempt++) {
+                    const adjustmentAngle = 60 + attempt * 30; // 60°, 90°, 120°
+                    const adjustedAngle = (currentAngle + adjustmentAngle) % 360;
+                    const adjustedPoint = this._calculatePointAtDistance(startPoint, clampedRadius, adjustedAngle);
+                    
+                    if (this._isValidIntermediatePoint(adjustedPoint, startPoint, points, targetDistance) &&
+                        this._isNonBacktrackingPoint(adjustedPoint, startPoint, points)) {
+                        points.push(adjustedPoint);
+                        lastAngle = adjustedAngle;
+                        validPointFound = true;
+                        break;
+                    }
+                }
+                
+                // 如果仍然无法找到有效点，使用安全的默认角度
+                if (!validPointFound) {
+                    const safeAngle = (lastAngle + 90) % 360;
+                    const safePoint = this._calculatePointAtDistance(startPoint, clampedRadius, safeAngle);
+                    points.push(safePoint);
+                    lastAngle = safeAngle;
+                }
             }
-            
-            previousAngle = currentAngle;
         }
         
-        // 最终验证整体路径的连续性
-        return this._validateOverallPathContinuity(points, startPoint, targetDistance, curveLevel);
+        // 确保至少有一个中间点
+        if (points.length === 0) {
+            const fallbackAngle = (startAngle + 120) % 360;
+            const fallbackPoint = this._calculatePointAtDistance(startPoint, baseRadius, fallbackAngle);
+            points.push(fallbackPoint);
+        }
+        
+        return points;
+    }
+
+    /**
+     * 生成备用中间点（当主要生成策略失败时使用）
+     * @param {Array} startPoint - 起始点 [lat, lng]
+     * @param {number} targetDistance - 目标距离(米)
+     * @param {string} curveLevel - 弯道等级
+     * @param {number} startBearing - 起始方位角
+     * @returns {Array} 中间点数组
+     */
+    _generateFallbackIntermediatePoints(startPoint, targetDistance, curveLevel, startBearing) {
+        console.log('使用备用中间点生成策略');
+        
+        // 使用更简单的策略：固定角度间隔生成点
+        const points = [];
+        const numPoints = Math.max(4, Math.floor(targetDistance / 5000)); // 每5km一个点，最少4个点
+        
+        // 修复半径计算：使用更保守的半径，避免生成过远的点
+        const baseRadius = Math.min(targetDistance / (2 * Math.PI) * 0.6, 15000); // 限制最大半径为15km
+        const angleStep = 360 / numPoints;
+        
+        console.log(`备用策略参数: numPoints=${numPoints}, baseRadius=${baseRadius}米, angleStep=${angleStep}度`);
+        
+        for (let i = 0; i < numPoints; i++) {
+            const angle = (startBearing + i * angleStep) % 360;
+            try {
+                const point = this._calculatePointAtDistance(startPoint, baseRadius, angle);
+                console.log(`生成备用点 ${i}: [${point[0].toFixed(6)}, ${point[1].toFixed(6)}], 角度=${angle}度`);
+                points.push(point);
+            } catch (error) {
+                console.error(`生成备用点 ${i} 失败:`, error.message);
+                // 如果计算失败，使用更小的半径重试
+                const fallbackRadius = baseRadius * 0.5;
+                const fallbackPoint = this._calculatePointAtDistance(startPoint, fallbackRadius, angle);
+                console.log(`使用备用半径生成点 ${i}: [${fallbackPoint[0].toFixed(6)}, ${fallbackPoint[1].toFixed(6)}]`);
+                points.push(fallbackPoint);
+            }
+        }
+        
+        return points;
+    }
+
+    /**
+     * 验证中间点是否有效
+     * @param {Array} point - 待验证的点 [lat, lng]
+     * @param {Array} startPoint - 起始点 [lat, lng]
+     * @param {Array} existingPoints - 已存在的点数组
+     * @param {number} targetDistance - 目标距离(公里)
+     * @returns {boolean} 是否有效
+     */
+    _isValidIntermediatePoint(point, startPoint, existingPoints, targetDistance) {
+        const minDistance = targetDistance * 0.05; // 最小距离为目标距离的5%
+        
+        // 检查与起点的距离
+        const distanceToStart = this._calculateDistance(point, startPoint);
+        if (distanceToStart < minDistance) {
+            return false;
+        }
+        
+        // 检查与已存在点的距离
+        for (const existingPoint of existingPoints) {
+            const distanceToExisting = this._calculateDistance(point, existingPoint);
+            if (distanceToExisting < minDistance) {
+                return false;
+            }
+        }
+        
+        return true;
+    }
+    
+    /**
+     * 检查点是否会造成回头路
+     * @param {Array} newPoint - 新点 [lat, lng]
+     * @param {Array} startPoint - 起始点 [lat, lng]
+     * @param {Array} existingPoints - 已存在的点数组
+     * @returns {boolean} 是否不会造成回头路
+     */
+    _isNonBacktrackingPoint(newPoint, startPoint, existingPoints) {
+        if (existingPoints.length < 2) {
+            return true; // 前两个点无需检查回头路
+        }
+        
+        // 获取最近的两个点
+        const lastPoint = existingPoints[existingPoints.length - 1];
+        const secondLastPoint = existingPoints[existingPoints.length - 2];
+        
+        // 计算前一段的方向向量
+        const prevDirection = {
+            lat: lastPoint[0] - secondLastPoint[0],
+            lng: lastPoint[1] - secondLastPoint[1]
+        };
+        
+        // 计算新段的方向向量
+        const newDirection = {
+            lat: newPoint[0] - lastPoint[0],
+            lng: newPoint[1] - lastPoint[1]
+        };
+        
+        // 计算向量夹角的余弦值
+        const dotProduct = prevDirection.lat * newDirection.lat + prevDirection.lng * newDirection.lng;
+        const prevMagnitude = Math.sqrt(prevDirection.lat * prevDirection.lat + prevDirection.lng * prevDirection.lng);
+        const newMagnitude = Math.sqrt(newDirection.lat * newDirection.lat + newDirection.lng * newDirection.lng);
+        
+        if (prevMagnitude === 0 || newMagnitude === 0) {
+            return true; // 避免除零错误
+        }
+        
+        const cosAngle = dotProduct / (prevMagnitude * newMagnitude);
+        
+        // 如果夹角大于120度（余弦值小于-0.5），认为是回头路
+        return cosAngle > -0.5;
     }
     
     /**
@@ -3365,20 +3557,42 @@ class Blucap {
      * 计算最优中间点数量
      */
     _calculateOptimalPointCount(targetDistance, curveLevel) {
-        const baseCount = curveLevel === "high" ? 4 : (curveLevel === "medium" ? 3 : 2);
-        const distanceFactor = Math.min(Math.max(targetDistance / 100000, 0.5), 2); // 50-200km范围调整
+        // 根据目标距离动态计算点数，确保长距离路线有足够的中间点
+        const baseCount = curveLevel === "high" ? 6 : (curveLevel === "medium" ? 4 : 3);
+        
+        // 改进距离因子计算：对于长距离路线，需要更多的点
+        let distanceFactor;
+        if (targetDistance >= 50000) { // 50km以上
+            distanceFactor = Math.min(Math.max(targetDistance / 15000, 1.5), 3); // 更积极的缩放
+        } else if (targetDistance >= 10000) { // 10km以上
+            distanceFactor = Math.min(Math.max(targetDistance / 8000, 1.2), 2.5);
+        } else {
+            distanceFactor = Math.min(Math.max(targetDistance / 5000, 0.8), 1.5);
+        }
+        
         const calculatedCount = Math.round(baseCount * distanceFactor);
-        // GraphHopper API限制：最多4个中间点（加上起点总共5个点）
-        return Math.min(calculatedCount, 4);
+        // GraphHopper Basic计划支持最多28个中间点（加上起点和终点总共30个点）
+        return Math.min(calculatedCount, 28);
     }
 
     /**
      * 计算基础半径
      */
     _calculateBaseRadius(targetDistance, curveLevel) {
-        // 更保守的半径计算，避免路径过于紧密
-        const circumferenceFactor = curveLevel === "high" ? 3.5 : (curveLevel === "medium" ? 3.0 : 2.5);
-        return (targetDistance / 1000) / circumferenceFactor;
+        // 改进半径计算：基于圆周长公式 C = 2πr，所以 r = C / (2π)
+        // 调整复杂度因子，考虑实际路径规划的弯曲度
+        const complexityFactor = curveLevel === "high" ? 1.6 : (curveLevel === "medium" ? 1.3 : 1.15);
+        const effectiveDistance = targetDistance * complexityFactor;
+        
+        // 计算基础半径（公里），然后转换为米
+        const radiusKm = effectiveDistance / (2 * Math.PI);
+        const radiusMeters = radiusKm * 1000;
+        
+        // 确保半径在合理范围内（targetDistance已经是米为单位）
+        const minRadius = targetDistance * 0.08; // 最小半径为目标距离的8%
+        const maxRadius = targetDistance * 0.45; // 最大半径为目标距离的45%
+        
+        return Math.max(minRadius, Math.min(radiusMeters, maxRadius));
     }
 
     /**
@@ -3804,20 +4018,93 @@ class Blucap {
      * 根据距离和方位角计算新点
      */
     _calculatePointAtDistance(point, distance, bearing) {
+        // 参数验证
+        if (!point || point.length < 2 || isNaN(point[0]) || isNaN(point[1])) {
+            throw new Error(`Invalid point: ${JSON.stringify(point)}`);
+        }
+        if (isNaN(distance) || distance < 0) {
+            throw new Error(`Invalid distance: ${distance}`);
+        }
+        if (isNaN(bearing)) {
+            throw new Error(`Invalid bearing: ${bearing}`);
+        }
+        
         const R = 6371000; // 地球半径(米)
         // 输入point格式: [lat, lng]
         const lat1Rad = point[0] * Math.PI / 180;
         const lng1Rad = point[1] * Math.PI / 180;
         const bearingRad = bearing * Math.PI / 180;
         
-        const lat2Rad = Math.asin(Math.sin(lat1Rad) * Math.cos(distance/R) +
-                               Math.cos(lat1Rad) * Math.sin(distance/R) * Math.cos(bearingRad));
+        // 计算新纬度，确保asin参数在有效范围内[-1, 1]
+        const asinArg = Math.sin(lat1Rad) * Math.cos(distance/R) +
+                       Math.cos(lat1Rad) * Math.sin(distance/R) * Math.cos(bearingRad);
+        const clampedAsinArg = Math.max(-1, Math.min(1, asinArg));
+        const lat2Rad = Math.asin(clampedAsinArg);
         
         const lng2Rad = lng1Rad + Math.atan2(Math.sin(bearingRad) * Math.sin(distance/R) * Math.cos(lat1Rad),
                                           Math.cos(distance/R) - Math.sin(lat1Rad) * Math.sin(lat2Rad));
         
+        const lat2 = lat2Rad * 180 / Math.PI;
+        const lng2 = lng2Rad * 180 / Math.PI;
+        
+        // 验证结果
+        if (isNaN(lat2) || isNaN(lng2)) {
+            throw new Error(`Calculation resulted in NaN: lat=${lat2}, lng=${lng2}, input=[${point[0]}, ${point[1]}], distance=${distance}, bearing=${bearing}`);
+        }
+        
         // 返回格式: [lat, lng] 保持与输入格式一致
-        return [lat2Rad * 180 / Math.PI, lng2Rad * 180 / Math.PI];
+        return [lat2, lng2];
+    }
+    
+    /**
+     * 计算优化的闭合点，用于改善环形路线的闭合度
+     * @param {Array} startPoint - 起始点 [lat, lng]
+     * @param {Array} lastIntermediatePoint - 最后一个中间点 [lat, lng]
+     * @param {number} targetDistance - 目标距离(公里)
+     * @param {string} curveLevel - 弯道等级
+     * @returns {Array} 优化后的闭合点 [lat, lng]
+     */
+    _calculateClosureOptimizedPoint(startPoint, lastIntermediatePoint, targetDistance, curveLevel) {
+        // 注意：输入参数应该是[lat, lng]格式
+        // 验证输入格式
+        if (!startPoint || !lastIntermediatePoint || startPoint.length < 2 || lastIntermediatePoint.length < 2) {
+            throw new Error('Invalid input points for closure optimization');
+        }
+            
+        // 计算从最后中间点到起点的方位角
+        const bearingToStart = this._calculateBearing(lastIntermediatePoint, startPoint);
+        
+        // 计算当前距离
+        const currentDistance = this._calculateDistance(lastIntermediatePoint, startPoint);
+        
+        // 根据弯道等级调整闭合策略
+        const curveFactors = {
+            'low': { closureRatio: 1.2, offsetAngle: 15 },
+            'medium': { closureRatio: 1.5, offsetAngle: 25 },
+            'high': { closureRatio: 2.0, offsetAngle: 35 }
+        };
+        
+        const factor = curveFactors[curveLevel] || curveFactors['medium'];
+        
+        // 计算优化距离 - 确保合理的闭合距离
+        const maxDistance = Math.min(15000, targetDistance * 0.8); // 最大15km或目标距离的80%
+        const baseDistance = Math.max(currentDistance * factor.closureRatio, targetDistance * 0.3); // 基础距离
+        
+        const optimalDistance = Math.min(baseDistance, maxDistance);
+        
+        // 添加轻微的角度偏移，避免完全直线回到起点
+        const adjustedBearing = (bearingToStart + factor.offsetAngle) % 360;
+        
+        // 计算优化后的闭合点
+        // _calculatePointAtDistance期望[lat, lng]格式并返回[lat, lng]格式
+        const optimizedPoint = this._calculatePointAtDistance(
+            lastIntermediatePoint,
+            optimalDistance,
+            adjustedBearing
+        );
+        
+        // 返回[lat, lng]格式
+        return optimizedPoint;
     }
     
     /**
@@ -3871,7 +4158,13 @@ class Blucap {
         const closureRatio = Math.max(0, 1 - (closureAnalysis.primary_closure_distance / maxAcceptableDistance));
         
         // 验证起点是否接近原始起点
-        const startPointDistance = utils._calculateHighPrecisionDistance(startPoint, routeStart);
+        // 确保坐标格式一致：startPoint可能是[lat,lng]，routeStart是[lng,lat]
+        // 将startPoint转换为[lng,lat]格式
+        const startPointFormatted = Array.isArray(startPoint) && startPoint.length === 2 
+            ? [startPoint[1], startPoint[0]]  // [lat,lng] -> [lng,lat]
+            : startPoint;
+        // 修正：起点偏差应该计算路径起点与原始起点的距离，而不是与路径终点的距离
+        const startPointDistance = utils._calculateHighPrecisionDistance(startPointFormatted, routeStart);
         
         // 增强的几何验证
         const geometryAnalysis = this._analyzeRouteGeometry(coordinates, startPoint, targetDistance);
@@ -4135,24 +4428,27 @@ class Blucap {
     _performEnhancedClosureAnalysis(params) {
         const { routeStart, routeEnd, startPoint, coordinates, targetDistance } = params;
         
-        // 坐标格式转换：startPoint是[lat,lng]，routeEnd是[lng,lat]
-        // 需要将startPoint转换为[lng,lat]格式以保持一致
-        const startPointConverted = [startPoint[1], startPoint[0]]; // [lat,lng] -> [lng,lat]
+        // 坐标格式转换：确保startPoint与routeEnd格式一致
+        // startPoint可能是[lat,lng]，routeEnd是[lng,lat]
+        // 将startPoint转换为[lng,lat]格式以保持一致
+        const startPointFormatted = Array.isArray(startPoint) && startPoint.length === 2 
+            ? [startPoint[1], startPoint[0]]  // [lat,lng] -> [lng,lat]
+            : startPoint;
         
         // 主要闭合距离计算（高精度）- 计算路径终点与原始起始点的距离
-        const primaryClosureDistance = utils._calculateHighPrecisionDistance(routeEnd, startPointConverted);
+        const primaryClosureDistance = utils._calculateHighPrecisionDistance(routeEnd, startPointFormatted);
         
         // 多点闭合验证 - 检查路径末端多个点的闭合情况
-        const multiPointAnalysis = this._analyzeMultiPointClosure(coordinates, startPointConverted, targetDistance);
+        const multiPointAnalysis = this._analyzeMultiPointClosure(coordinates, startPointFormatted, targetDistance);
         
         // 路径方向一致性检查
-        const directionConsistency = this._validateClosureDirection(coordinates, startPointConverted);
+        const directionConsistency = this._validateClosureDirection(coordinates, startPointFormatted);
         
         // 闭合路径的几何稳定性分析
         const geometricStability = this._analyzeClosureStability(coordinates, routeStart, routeEnd, targetDistance);
         
         // 渐进式闭合质量评估
-        const progressiveClosure = this._evaluateProgressiveClosure(coordinates, startPointConverted);
+        const progressiveClosure = this._evaluateProgressiveClosure(coordinates, startPointFormatted);
         
         // 闭合精度等级评估
         const precisionGrade = this._calculateClosurePrecisionGrade({
@@ -4804,11 +5100,18 @@ class Blucap {
         const closureRatio = closureDistance / targetDistance;
         
         // 计算高级闭合指标
+        const routeStart = coordinates[0];
+        const routeEnd = coordinates[coordinates.length - 1];
+        const startPointDistance = this._calculateDistance(startPoint, routeStart);
+        
         const advancedMetrics = utils._calculateAdvancedClosureMetrics({
-            coordinates,
+            routeStart,
+            routeEnd,
             startPoint,
+            coordinates,
             targetDistance,
-            curveLevel
+            closureDistance,
+            startPointDistance
         });
         
         // 几何分析
@@ -5443,7 +5746,8 @@ class Blucap {
       */
      _calculateEnhancedBacktrackMetrics(segments, coordinates, totalDistance) {
          const totalBacktrackDistance = segments.reduce((sum, segment) => sum + segment.distance, 0);
-         const backtrackRatio = totalDistance > 0 ? totalBacktrackDistance / totalDistance : 0;
+         // 修复折返比例计算：应该是折返距离占总距离的百分比，而不是倍数
+         const backtrackRatio = totalDistance > 0 ? Math.min(1.0, totalBacktrackDistance / totalDistance) : 0;
          
          // 计算综合严重程度
          const severityScore = segments.length > 0 ? 

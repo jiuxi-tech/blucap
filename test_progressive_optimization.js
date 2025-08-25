@@ -71,11 +71,14 @@ async function testProgressiveOptimization() {
             console.log(`生成优化点数量: ${optimizedPoints.length}`);
             
             // 测试质量评估
+            const mockCoordinates = [testCase.startPoint, ...optimizedPoints, testCase.startPoint];
             const mockResult = {
+                coordinates: mockCoordinates,
+                distance: testCase.targetDistance * 0.95, // 模拟接近目标距离
                 paths: [{ distance: testCase.targetDistance * 1.05 }],
                 features: [{
                     geometry: {
-                        coordinates: [testCase.startPoint, ...optimizedPoints, testCase.startPoint]
+                        coordinates: mockCoordinates
                     }
                 }]
             };
