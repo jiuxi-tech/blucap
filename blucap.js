@@ -49,13 +49,21 @@ const utils = {
      * @returns {string} 质量等级
      */
     _calculateQualityGrade(score) {
-        if (score >= 0.95) return 'A+';
-        if (score >= 0.90) return 'A';
-        if (score >= 0.85) return 'B+';
-        if (score >= 0.80) return 'B';
-        if (score >= 0.75) return 'C+';
-        if (score >= 0.70) return 'C';
-        if (score >= 0.60) return 'D';
+        // 添加安全检查，确保score是有效数字
+        if (isNaN(score) || score === undefined || score === null) {
+            return 'F';
+        }
+        
+        // 确保score在有效范围内
+        const validScore = Math.max(0, Math.min(1, score));
+        
+        if (validScore >= 0.95) return 'A+';
+        if (validScore >= 0.90) return 'A';
+        if (validScore >= 0.85) return 'B+';
+        if (validScore >= 0.80) return 'B';
+        if (validScore >= 0.75) return 'C+';
+        if (validScore >= 0.70) return 'C';
+        if (validScore >= 0.60) return 'D';
         return 'F';
     },
 
@@ -219,22 +227,31 @@ const utils = {
         // 计算路径总长度
         const totalPathLength = utils._estimatePathDistance(coordinates);
         
-        // 计算闭合效率（闭合距离与总路径长度的比值）
-        const closureEfficiency = 1 - (closureDistance / totalPathLength);
+        // 计算闭合效率（闭合距离与总路径长度的比值）- 添加安全检查
+        let closureEfficiency = 0;
+        if (totalPathLength && totalPathLength > 0 && !isNaN(totalPathLength)) {
+            closureEfficiency = 1 - (closureDistance / totalPathLength);
+        }
         
-        // 计算路径偏心率
-        const eccentricity = utils._calculatePathEccentricity(coordinates);
+        // 计算路径偏心率 - 添加安全检查
+        const eccentricity = utils._calculatePathEccentricity(coordinates) || 0;
         
-        // 计算闭合一致性
-        const closureConsistency = utils._calculateClosureConsistency(coordinates, startPoint);
+        // 计算闭合一致性 - 添加安全检查
+        const closureConsistency = utils._calculateClosureConsistency(coordinates, startPoint) || 0;
+        
+        // 计算相对闭合误差 - 添加安全检查
+        let relativeClosureError = 0;
+        if (targetDistance && targetDistance > 0) {
+            relativeClosureError = closureDistance / targetDistance;
+        }
         
         return {
             closure_vector: closureVector,
-            closure_angle: closureAngle,
-            closure_efficiency: Math.max(0, closureEfficiency),
-            path_eccentricity: eccentricity,
-            closure_consistency: closureConsistency,
-            relative_closure_error: closureDistance / targetDistance
+            closure_angle: isNaN(closureAngle) ? 0 : closureAngle,
+            closure_efficiency: Math.max(0, Math.min(1, isNaN(closureEfficiency) ? 0 : closureEfficiency)),
+            path_eccentricity: Math.max(0, Math.min(1, isNaN(eccentricity) ? 0 : eccentricity)),
+            closure_consistency: Math.max(0, Math.min(1, isNaN(closureConsistency) ? 0 : closureConsistency)),
+            relative_closure_error: isNaN(relativeClosureError) ? 0 : relativeClosureError
         };
     },
 
@@ -388,11 +405,13 @@ const utils = {
      * @returns {number} 指标评分
      */
     _scoreClosureMetrics(closureMetrics) {
-        const efficiencyScore = Math.max(0, Math.min(1, closureMetrics.closure_efficiency));
-        const consistencyScore = Math.max(0, Math.min(1, closureMetrics.closure_consistency));
-        const eccentricityScore = Math.max(0, 1 - closureMetrics.path_eccentricity);
+        // 添加安全检查，确保所有值都是有效数字
+        const efficiencyScore = Math.max(0, Math.min(1, isNaN(closureMetrics.closure_efficiency) ? 0 : closureMetrics.closure_efficiency));
+        const consistencyScore = Math.max(0, Math.min(1, isNaN(closureMetrics.closure_consistency) ? 0 : closureMetrics.closure_consistency));
+        const eccentricityScore = Math.max(0, 1 - (isNaN(closureMetrics.path_eccentricity) ? 0 : closureMetrics.path_eccentricity));
         
-        return (efficiencyScore + consistencyScore + eccentricityScore) / 3;
+        const totalScore = (efficiencyScore + consistencyScore + eccentricityScore) / 3;
+        return isNaN(totalScore) ? 0 : totalScore;
     },
 
     /**
@@ -401,11 +420,13 @@ const utils = {
      * @returns {number} 连续性评分
      */
     _evaluatePathContinuity(closureMetrics) {
-        // 基于闭合角度和效率评估连续性
-        const angleScore = Math.max(0, 1 - Math.abs(closureMetrics.closure_angle) / 180);
-        const efficiencyScore = closureMetrics.closure_efficiency;
+        // 基于闭合角度和效率评估连续性 - 添加安全检查
+        const closureAngle = isNaN(closureMetrics.closure_angle) ? 0 : closureMetrics.closure_angle;
+        const angleScore = Math.max(0, 1 - Math.abs(closureAngle) / 180);
+        const efficiencyScore = isNaN(closureMetrics.closure_efficiency) ? 0 : closureMetrics.closure_efficiency;
         
-        return (angleScore + efficiencyScore) / 2;
+        const continuityScore = (angleScore + efficiencyScore) / 2;
+        return isNaN(continuityScore) ? 0 : continuityScore;
     },
 
     /**
@@ -2023,7 +2044,7 @@ class Blucap {
 
         // 转换为新API格式
         return this.generateFunRoute({
-            start_point: [startPoint[1], startPoint[0]], // 转换为 [lng, lat]
+            start_point: startPoint, // 保持 [lat, lng] 格式
             target_distance: distance * 1000, // 转换为米
             curve_level: curveLevel,
             route_type: "roundtrip",
@@ -2076,13 +2097,22 @@ class Blucap {
         const targetDistance = reqArgs.target_distance;
         const curveLevel = reqArgs.curve_level || "medium";
         const startBearing = reqArgs.start_bearing || 0;
+        const enableProgressiveOptimization = reqArgs.enable_progressive_optimization !== false; // 默认启用
         
         // 生成中间点来创建环形路线
-        const intermediatePoints = this._generateIntermediatePoints(
+        let intermediatePoints = this._generateIntermediatePoints(
             startPoint, 
             targetDistance, 
             curveLevel,
             startBearing
+        );
+        
+        // 应用防回头路优化到中间点生成
+        intermediatePoints = this._optimizeIntermediatePointsForBacktrackPrevention(
+            intermediatePoints,
+            startPoint,
+            targetDistance,
+            curveLevel
         );
         
         // 构建路线点数组 (起点 -> 中间点们 -> 起点)
@@ -2091,22 +2121,25 @@ class Blucap {
         const limitedIntermediatePoints = intermediatePoints.slice(0, maxIntermediatePoints);
         const routePoints = [startPoint, ...limitedIntermediatePoints, startPoint];
         
-        const routeRequest = {
-            points: routePoints,
-            profile: reqArgs.profile,
-            instructions: reqArgs.instructions,
-            points_encoded: reqArgs.points_encoded,
-            elevation: reqArgs.elevation,
-            locale: reqArgs.locale
-        };
-        
-        // 应用弯道设置
-        this._applyCurveSettings(routeRequest, curveLevel);
-        
-        const result = await this._doRouteRequest(routeRequest);
+        // 使用_requestRoute来处理坐标转换和请求构建
+        const result = await this._requestRoute(routePoints, curveLevel);
         
         // 环形闭合验证和优化
-        const validationResult = this._validateCircularClosure(result, startPoint, targetDistance);
+        let validationResult = this._validateCircularClosure(result, startPoint, targetDistance);
+        
+        // 如果闭合验证失败，尝试优化闭合
+        if (!validationResult.is_closed || validationResult.closure_distance > 100) {
+            try {
+                const optimizedResult = await this._optimizeCircularClosure(routeRequest, startPoint, targetDistance, curveLevel, enableProgressiveOptimization);
+                if (optimizedResult && optimizedResult.paths && optimizedResult.paths.length > 0) {
+                    // 使用优化后的结果
+                    Object.assign(result, optimizedResult);
+                    validationResult = this._validateCircularClosure(result, startPoint, targetDistance);
+                }
+            } catch (error) {
+                console.warn('闭合优化失败，使用原始路线:', error.message);
+            }
+        }
         
         // 原路折返检测
         const backtrackingResult = this._detectBacktracking(result);
@@ -2168,6 +2201,283 @@ class Blucap {
     }
     
     /**
+     * 优化中间点以防止回头路
+     */
+    _optimizeIntermediatePointsForBacktrackPrevention(intermediatePoints, startPoint, targetDistance, curveLevel) {
+        if (!intermediatePoints || intermediatePoints.length === 0) {
+            return intermediatePoints;
+        }
+        
+        // 创建包含起点和终点的完整路径用于分析
+        const fullPath = [startPoint, ...intermediatePoints, startPoint];
+        
+        // 检测潜在的回头路段
+        const backtrackRisks = this._analyzeBacktrackRisks(fullPath);
+        
+        // 如果没有回头路风险，直接返回原始点
+        if (backtrackRisks.length === 0) {
+            return intermediatePoints;
+        }
+        
+        // 应用防回头路优化策略
+        let optimizedPoints = [...intermediatePoints];
+        
+        for (const risk of backtrackRisks) {
+            optimizedPoints = this._applyBacktrackPreventionStrategy(
+                optimizedPoints,
+                startPoint,
+                risk,
+                targetDistance,
+                curveLevel
+            );
+        }
+        
+        // 验证优化后的点是否仍然满足距离和闭合要求
+        const validationResult = this._validateOptimizedPoints(
+            optimizedPoints,
+            startPoint,
+            targetDistance,
+            curveLevel
+        );
+        
+        // 如果验证失败，使用备用优化策略
+        if (!validationResult.is_valid) {
+            optimizedPoints = this._applyFallbackOptimization(
+                intermediatePoints,
+                startPoint,
+                targetDistance,
+                curveLevel,
+                validationResult
+            );
+        }
+        
+        return optimizedPoints;
+    }
+    
+    /**
+     * 分析回头路风险
+     */
+    _analyzeBacktrackRisks(pathPoints) {
+        const risks = [];
+        
+        for (let i = 0; i < pathPoints.length - 2; i++) {
+            const p1 = pathPoints[i];
+            const p2 = pathPoints[i + 1];
+            const p3 = pathPoints[i + 2];
+            
+            // 计算方向变化
+            const bearing1 = this._calculateBearing(p1, p2);
+            const bearing2 = this._calculateBearing(p2, p3);
+            const directionChange = Math.abs(bearing2 - bearing1);
+            
+            // 标准化角度差
+            const normalizedChange = directionChange > 180 ? 360 - directionChange : directionChange;
+            
+            // 检测急转弯（可能导致回头路）
+            if (normalizedChange > 120) {
+                const distance1 = this._calculateDistance(p1, p2);
+                const distance2 = this._calculateDistance(p2, p3);
+                
+                risks.push({
+                    index: i + 1,
+                    point: p2,
+                    direction_change: normalizedChange,
+                    risk_level: this._calculateBacktrackRiskLevel(normalizedChange, distance1, distance2),
+                    segment_distances: [distance1, distance2]
+                });
+            }
+        }
+        
+        return risks;
+    }
+    
+    /**
+     * 计算回头路风险等级
+     */
+    _calculateBacktrackRiskLevel(directionChange, distance1, distance2) {
+        let riskScore = 0;
+        
+        // 方向变化风险
+        if (directionChange > 150) riskScore += 0.4;
+        else if (directionChange > 120) riskScore += 0.2;
+        
+        // 距离不平衡风险
+        const distanceRatio = Math.max(distance1, distance2) / Math.min(distance1, distance2);
+        if (distanceRatio > 3) riskScore += 0.3;
+        else if (distanceRatio > 2) riskScore += 0.15;
+        
+        // 短距离段风险
+        const avgDistance = (distance1 + distance2) / 2;
+        if (avgDistance < 500) riskScore += 0.3;
+        else if (avgDistance < 1000) riskScore += 0.15;
+        
+        return Math.min(riskScore, 1.0);
+    }
+    
+    /**
+     * 应用防回头路策略
+     */
+    _applyBacktrackPreventionStrategy(points, startPoint, risk, targetDistance, curveLevel) {
+        const optimizedPoints = [...points];
+        const riskIndex = risk.index - 1; // 转换为中间点数组索引
+        
+        if (riskIndex < 0 || riskIndex >= optimizedPoints.length) {
+            return optimizedPoints;
+        }
+        
+        // 根据风险等级选择优化策略
+        if (risk.risk_level > 0.7) {
+            // 高风险：重新计算点位置
+            optimizedPoints[riskIndex] = this._recalculatePointPosition(
+                startPoint,
+                optimizedPoints,
+                riskIndex,
+                targetDistance,
+                curveLevel
+            );
+        } else if (risk.risk_level > 0.4) {
+            // 中等风险：微调点位置
+            optimizedPoints[riskIndex] = this._adjustPointPosition(
+                optimizedPoints[riskIndex],
+                startPoint,
+                risk,
+                curveLevel
+            );
+        }
+        
+        return optimizedPoints;
+    }
+    
+    /**
+     * 重新计算点位置
+     */
+    _recalculatePointPosition(startPoint, points, index, targetDistance, curveLevel) {
+        const totalPoints = points.length;
+        const angleStep = (2 * Math.PI) / (totalPoints + 1);
+        const targetAngle = angleStep * (index + 1);
+        
+        // 计算基础半径
+        const baseRadius = this._calculateBaseRadius(targetDistance, curveLevel);
+        
+        // 应用曲线等级调整
+        const radiusVariation = this._calculateRadiusVariation(index, totalPoints, curveLevel);
+        const adjustedRadius = baseRadius * (1 + radiusVariation);
+        
+        // 计算新位置
+        const newLat = startPoint.lat + (adjustedRadius / 111320) * Math.cos(targetAngle);
+        const newLng = startPoint.lng + (adjustedRadius / (111320 * Math.cos(startPoint.lat * Math.PI / 180))) * Math.sin(targetAngle);
+        
+        return { lat: newLat, lng: newLng };
+    }
+    
+    /**
+     * 微调点位置
+     */
+    _adjustPointPosition(point, startPoint, risk, curveLevel) {
+        // 计算调整向量
+        const adjustmentFactor = 0.1 * risk.risk_level;
+        const bearing = this._calculateBearing(startPoint, point);
+        
+        // 垂直于当前方向的调整
+        const perpendicularBearing = bearing + 90;
+        const adjustmentDistance = 200 * adjustmentFactor; // 最大200米调整
+        
+        return this._calculatePointAtDistance(point, adjustmentDistance, perpendicularBearing);
+    }
+    
+    /**
+     * 计算半径变化
+     */
+    _calculateRadiusVariation(index, totalPoints, curveLevel) {
+        const curveSettings = {
+            'low': { variation: 0.1, frequency: 0.5 },
+            'medium': { variation: 0.2, frequency: 1.0 },
+            'high': { variation: 0.3, frequency: 1.5 },
+            'extreme': { variation: 0.4, frequency: 2.0 }
+        };
+        
+        const settings = curveSettings[curveLevel] || curveSettings['medium'];
+        const phase = (index / totalPoints) * 2 * Math.PI * settings.frequency;
+        
+        return settings.variation * Math.sin(phase);
+    }
+    
+    /**
+     * 验证优化后的点
+     */
+    _validateOptimizedPoints(points, startPoint, targetDistance, curveLevel) {
+        // 创建完整路径
+        const fullPath = [startPoint, ...points, startPoint];
+        
+        // 估算总距离
+        const estimatedDistance = this._estimatePathDistance(fullPath);
+        const distanceDeviation = Math.abs(estimatedDistance - targetDistance) / targetDistance;
+        
+        // 检查闭合质量
+        const closureDistance = this._calculateDistance(startPoint, points[points.length - 1]);
+        const maxAcceptableClosure = targetDistance * 0.05; // 5%容差
+        
+        // 检查点间距离合理性
+        const segmentDistances = [];
+        for (let i = 0; i < fullPath.length - 1; i++) {
+            segmentDistances.push(this._calculateDistance(fullPath[i], fullPath[i + 1]));
+        }
+        
+        const avgSegmentDistance = segmentDistances.reduce((a, b) => a + b, 0) / segmentDistances.length;
+        const segmentVariance = segmentDistances.reduce((sum, dist) => sum + Math.pow(dist - avgSegmentDistance, 2), 0) / segmentDistances.length;
+        const segmentStdDev = Math.sqrt(segmentVariance);
+        
+        const isValid = distanceDeviation < 0.15 && // 距离偏差小于15%
+                       closureDistance < maxAcceptableClosure && // 闭合距离合理
+                       segmentStdDev < avgSegmentDistance * 0.5; // 段距离变化不过大
+        
+        return {
+            is_valid: isValid,
+            distance_deviation: distanceDeviation,
+            closure_distance: closureDistance,
+            segment_consistency: segmentStdDev / avgSegmentDistance,
+            estimated_distance: estimatedDistance
+        };
+    }
+    
+    /**
+     * 应用备用优化策略
+     */
+    _applyFallbackOptimization(originalPoints, startPoint, targetDistance, curveLevel, validationResult) {
+        // 如果主要优化失败，使用更保守的策略
+        const fallbackPoints = [...originalPoints];
+        
+        // 减少点的数量以简化路径
+        if (fallbackPoints.length > 2) {
+            const reducedCount = Math.max(2, Math.floor(fallbackPoints.length * 0.8));
+            return this._regenerateSimplifiedPoints(startPoint, targetDistance, curveLevel, reducedCount);
+        }
+        
+        return fallbackPoints;
+    }
+    
+    /**
+     * 重新生成简化的点
+     */
+    _regenerateSimplifiedPoints(startPoint, targetDistance, curveLevel, pointCount) {
+        const points = [];
+        const angleStep = (2 * Math.PI) / (pointCount + 1);
+        const baseRadius = this._calculateBaseRadius(targetDistance, curveLevel);
+        
+        for (let i = 0; i < pointCount; i++) {
+            const angle = angleStep * (i + 1);
+            const radius = baseRadius * (0.9 + 0.2 * Math.random()); // 添加轻微随机性
+            
+            const lat = startPoint.lat + (radius / 111320) * Math.cos(angle);
+            const lng = startPoint.lng + (radius / (111320 * Math.cos(startPoint.lat * Math.PI / 180))) * Math.sin(angle);
+            
+            points.push({ lat, lng });
+        }
+        
+        return points;
+    }
+    
+    /**
      * 生成点对点路线
      */
     async _generatePointToPoint(reqArgs) {
@@ -2184,10 +2494,19 @@ class Blucap {
         }
         
         // 生成中间点来增加路线长度和弯道
-        const intermediatePoints = this._generateDetourPoints(
+        let intermediatePoints = this._generateDetourPoints(
             startPoint, 
             endPoint, 
             targetDistance, 
+            curveLevel
+        );
+        
+        // 应用防回头路优化到点对点路线
+        intermediatePoints = this._optimizePointToPointForBacktrackPrevention(
+            intermediatePoints,
+            startPoint,
+            endPoint,
+            targetDistance,
             curveLevel
         );
         
@@ -2196,27 +2515,474 @@ class Blucap {
         const limitedIntermediatePoints = intermediatePoints.slice(0, maxIntermediatePoints);
         const routePoints = [startPoint, ...limitedIntermediatePoints, endPoint];
         
-        const routeRequest = {
-            points: routePoints,
-            profile: reqArgs.profile,
-            instructions: reqArgs.instructions,
-            points_encoded: reqArgs.points_encoded,
-            elevation: reqArgs.elevation,
-            locale: reqArgs.locale
-        };
+        // 使用_requestRoute来处理坐标转换和请求构建
+        const result = await this._requestRoute(routePoints, curveLevel);
         
-        // 应用弯道设置
-        this._applyCurveSettings(routeRequest, curveLevel);
+        // 原路折返检测
+        const backtrackingResult = this._detectBacktracking(result);
         
-        const result = await this._doRouteRequest(routeRequest);
+        // 路径平滑处理
+        const smoothedResult = this._applySmoothingAlgorithm(result, curveLevel);
+        
+        // 执行多层次路径验证（针对点对点路线）
+        const multiLevelValidation = this._performMultiLevelValidation(result, {
+            target_distance: targetDistance,
+            curve_level: curveLevel,
+            backtracking_analysis: backtrackingResult,
+            smoothing_result: smoothedResult,
+            route_type: 'point_to_point'
+        });
+        
+        // 计算路径质量评分
+        const qualityScore = this._calculatePathQualityScore({
+            backtracking_analysis: backtrackingResult,
+            smoothing_result: smoothedResult,
+            validation_result: multiLevelValidation,
+            route_result: result,
+            target_distance: targetDistance,
+            curve_level: curveLevel,
+            route_type: 'point_to_point'
+        });
+        
         result.route_info = {
             type: "point_to_point",
             target_distance: targetDistance,
             actual_distance: result.paths[0].distance,
             direct_distance: directDistance,
-            curve_level: curveLevel
+            curve_level: curveLevel,
+            backtracking_analysis: backtrackingResult,
+            smoothing_applied: smoothedResult.applied,
+            smoothing_stats: smoothedResult.stats,
+            multi_level_validation: multiLevelValidation,
+            quality_score: qualityScore
         };
+        
+        // 如果多层次验证不通过或质量评分过低，启动智能重试机制
+        if (!multiLevelValidation.overall_passed || qualityScore.overall_score < 0.6) {
+            const retryResult = await this._intelligentRetryMechanism({
+                original_result: result,
+                start_point: startPoint,
+                end_point: endPoint,
+                target_distance: targetDistance,
+                curve_level: curveLevel,
+                quality_score: qualityScore,
+                validation_result: multiLevelValidation,
+                route_type: 'point_to_point'
+            });
+            
+            if (retryResult && retryResult.route_info.quality_score.overall_score > qualityScore.overall_score) {
+                return retryResult;
+            }
+        }
+        
         return result;
+    }
+    
+    /**
+     * 优化点对点路线的防回头路处理
+     * @param {Array} intermediatePoints - 中间点数组
+     * @param {Array} startPoint - 起始点
+     * @param {Array} endPoint - 终点
+     * @param {number} targetDistance - 目标距离
+     * @param {string} curveLevel - 弯道等级
+     * @returns {Array} 优化后的中间点数组
+     */
+    _optimizePointToPointForBacktrackPrevention(intermediatePoints, startPoint, endPoint, targetDistance, curveLevel) {
+        if (!intermediatePoints || intermediatePoints.length === 0) {
+            return intermediatePoints;
+        }
+        
+        // 分析回头路风险
+        const backtrackRisks = this._analyzePointToPointBacktrackRisks(intermediatePoints, startPoint, endPoint);
+        
+        // 如果没有回头路风险，直接返回
+        if (backtrackRisks.length === 0) {
+            return intermediatePoints;
+        }
+        
+        // 应用防回头路策略
+        let optimizedPoints = this._applyPointToPointBacktrackPrevention(
+            intermediatePoints, 
+            startPoint, 
+            endPoint, 
+            backtrackRisks, 
+            curveLevel
+        );
+        
+        // 验证优化后的点
+        const validationResult = this._validateOptimizedPointToPointRoute(
+            optimizedPoints, 
+            startPoint, 
+            endPoint, 
+            targetDistance
+        );
+        
+        // 如果验证失败，应用备用优化策略
+        if (!validationResult.is_valid) {
+            optimizedPoints = this._applyPointToPointFallbackOptimization(
+                intermediatePoints, 
+                startPoint, 
+                endPoint, 
+                targetDistance, 
+                curveLevel
+            );
+        }
+        
+        return optimizedPoints;
+    }
+    
+    /**
+     * 分析点对点路线的回头路风险
+     * @param {Array} intermediatePoints - 中间点数组
+     * @param {Array} startPoint - 起始点
+     * @param {Array} endPoint - 终点
+     * @returns {Array} 回头路风险分析结果
+     */
+    _analyzePointToPointBacktrackRisks(intermediatePoints, startPoint, endPoint) {
+        const risks = [];
+        const allPoints = [startPoint, ...intermediatePoints, endPoint];
+        
+        for (let i = 1; i < allPoints.length - 1; i++) {
+            const prevPoint = allPoints[i - 1];
+            const currentPoint = allPoints[i];
+            const nextPoint = allPoints[i + 1];
+            
+            // 计算方向角度
+            const incomingBearing = this._calculateBearing(prevPoint, currentPoint);
+            const outgoingBearing = this._calculateBearing(currentPoint, nextPoint);
+            
+            // 计算角度变化
+            let angleDiff = Math.abs(outgoingBearing - incomingBearing);
+            if (angleDiff > 180) {
+                angleDiff = 360 - angleDiff;
+            }
+            
+            // 检测回头路风险
+            if (angleDiff > 120) { // 角度变化超过120度认为有回头路风险
+                const riskLevel = this._calculatePointToPointBacktrackRiskLevel(angleDiff, i, allPoints.length);
+                
+                risks.push({
+                    point_index: i - 1, // 在intermediatePoints中的索引
+                    angle_change: angleDiff,
+                    risk_level: riskLevel,
+                    incoming_bearing: incomingBearing,
+                    outgoing_bearing: outgoingBearing
+                });
+            }
+        }
+        
+        return risks;
+    }
+    
+    /**
+     * 计算点对点路线回头路风险等级
+     * @param {number} angleDiff - 角度变化
+     * @param {number} pointIndex - 点索引
+     * @param {number} totalPoints - 总点数
+     * @returns {string} 风险等级
+     */
+    _calculatePointToPointBacktrackRiskLevel(angleDiff, pointIndex, totalPoints) {
+        let riskScore = 0;
+        
+        // 角度因子
+        if (angleDiff > 160) riskScore += 3;
+        else if (angleDiff > 140) riskScore += 2;
+        else riskScore += 1;
+        
+        // 位置因子（中间位置风险更高）
+        const positionRatio = pointIndex / totalPoints;
+        if (positionRatio > 0.3 && positionRatio < 0.7) {
+            riskScore += 1;
+        }
+        
+        if (riskScore >= 4) return 'high';
+        if (riskScore >= 2) return 'medium';
+        return 'low';
+    }
+    
+    /**
+     * 应用点对点防回头路策略
+     * @param {Array} intermediatePoints - 中间点数组
+     * @param {Array} startPoint - 起始点
+     * @param {Array} endPoint - 终点
+     * @param {Array} backtrackRisks - 回头路风险数组
+     * @param {string} curveLevel - 弯道等级
+     * @returns {Array} 优化后的中间点数组
+     */
+    _applyPointToPointBacktrackPrevention(intermediatePoints, startPoint, endPoint, backtrackRisks, curveLevel) {
+        let optimizedPoints = [...intermediatePoints];
+        
+        // 按风险等级排序，优先处理高风险点
+        const sortedRisks = backtrackRisks.sort((a, b) => {
+            const riskOrder = { 'high': 3, 'medium': 2, 'low': 1 };
+            return riskOrder[b.risk_level] - riskOrder[a.risk_level];
+        });
+        
+        for (const risk of sortedRisks) {
+            const pointIndex = risk.point_index;
+            
+            if (pointIndex >= 0 && pointIndex < optimizedPoints.length) {
+                // 根据风险等级选择优化策略
+                if (risk.risk_level === 'high') {
+                    // 高风险：重新计算点位置
+                    optimizedPoints[pointIndex] = this._recalculatePointToPointPosition(
+                        optimizedPoints[pointIndex],
+                        startPoint,
+                        endPoint,
+                        pointIndex,
+                        optimizedPoints.length,
+                        curveLevel
+                    );
+                } else {
+                    // 中低风险：微调点位置
+                    optimizedPoints[pointIndex] = this._adjustPointToPointPosition(
+                        optimizedPoints[pointIndex],
+                        startPoint,
+                        endPoint,
+                        risk.angle_change,
+                        curveLevel
+                    );
+                }
+            }
+        }
+        
+        return optimizedPoints;
+    }
+    
+    /**
+     * 重新计算点对点路线中的点位置
+     * @param {Array} originalPoint - 原始点
+     * @param {Array} startPoint - 起始点
+     * @param {Array} endPoint - 终点
+     * @param {number} pointIndex - 点索引
+     * @param {number} totalPoints - 总点数
+     * @param {string} curveLevel - 弯道等级
+     * @returns {Array} 重新计算的点
+     */
+    _recalculatePointToPointPosition(originalPoint, startPoint, endPoint, pointIndex, totalPoints, curveLevel) {
+        // 计算在起终点连线上的进度
+        const progress = (pointIndex + 1) / (totalPoints + 1);
+        
+        // 计算起终点连线上的基准点
+        const basePoint = [
+            startPoint[0] + (endPoint[0] - startPoint[0]) * progress,
+            startPoint[1] + (endPoint[1] - startPoint[1]) * progress
+        ];
+        
+        // 计算主方向
+        const mainBearing = this._calculateBearing(startPoint, endPoint);
+        
+        // 计算偏移参数
+        const maxOffset = this._calculateMaxOffset(startPoint, endPoint, curveLevel);
+        const offsetAngle = this._calculateOffsetAngle(pointIndex, totalPoints, curveLevel);
+        
+        // 应用偏移
+        const offsetBearing = mainBearing + offsetAngle;
+        const offsetDistance = maxOffset * Math.sin(Math.PI * progress); // 使用正弦函数创建自然弧形
+        
+        return this._calculatePointAtDistance(basePoint, offsetDistance, offsetBearing);
+    }
+    
+    /**
+     * 微调点对点路线中的点位置
+     * @param {Array} originalPoint - 原始点
+     * @param {Array} startPoint - 起始点
+     * @param {Array} endPoint - 终点
+     * @param {number} angleChange - 角度变化
+     * @param {string} curveLevel - 弯道等级
+     * @returns {Array} 调整后的点
+     */
+    _adjustPointToPointPosition(originalPoint, startPoint, endPoint, angleChange, curveLevel) {
+        // 计算调整强度
+        const adjustmentIntensity = Math.min(angleChange / 180, 1);
+        
+        // 计算主方向
+        const mainBearing = this._calculateBearing(startPoint, endPoint);
+        
+        // 计算调整距离和方向
+        const adjustmentDistance = this._calculateMaxOffset(startPoint, endPoint, curveLevel) * adjustmentIntensity * 0.3;
+        const adjustmentBearing = mainBearing + (Math.random() - 0.5) * 60; // 随机偏移±30度
+        
+        return this._calculatePointAtDistance(originalPoint, adjustmentDistance, adjustmentBearing);
+    }
+    
+    /**
+     * 计算最大偏移距离
+     * @param {Array} startPoint - 起始点
+     * @param {Array} endPoint - 终点
+     * @param {string} curveLevel - 弯道等级
+     * @returns {number} 最大偏移距离（米）
+     */
+    _calculateMaxOffset(startPoint, endPoint, curveLevel) {
+        const directDistance = this._calculateDistance(startPoint, endPoint);
+        
+        const offsetRatios = {
+            'low': 0.1,
+            'medium': 0.2,
+            'high': 0.3
+        };
+        
+        return directDistance * (offsetRatios[curveLevel] || 0.2);
+    }
+    
+    /**
+     * 计算偏移角度
+     * @param {number} pointIndex - 点索引
+     * @param {number} totalPoints - 总点数
+     * @param {string} curveLevel - 弯道等级
+     * @returns {number} 偏移角度（度）
+     */
+    _calculateOffsetAngle(pointIndex, totalPoints, curveLevel) {
+        const progress = pointIndex / totalPoints;
+        
+        const maxAngles = {
+            'low': 30,
+            'medium': 60,
+            'high': 90
+        };
+        
+        const maxAngle = maxAngles[curveLevel] || 60;
+        
+        // 使用正弦函数创建平滑的角度变化
+        return maxAngle * Math.sin(Math.PI * progress) * (Math.random() > 0.5 ? 1 : -1);
+    }
+    
+    /**
+     * 验证优化后的点对点路线
+     * @param {Array} optimizedPoints - 优化后的中间点
+     * @param {Array} startPoint - 起始点
+     * @param {Array} endPoint - 终点
+     * @param {number} targetDistance - 目标距离
+     * @returns {Object} 验证结果
+     */
+    _validateOptimizedPointToPointRoute(optimizedPoints, startPoint, endPoint, targetDistance) {
+        const allPoints = [startPoint, ...optimizedPoints, endPoint];
+        
+        // 验证距离合理性
+        let totalDistance = 0;
+        for (let i = 0; i < allPoints.length - 1; i++) {
+            totalDistance += this._calculateDistance(allPoints[i], allPoints[i + 1]);
+        }
+        
+        const distanceDeviation = Math.abs(totalDistance - targetDistance) / targetDistance;
+        
+        // 验证路径连续性
+        let maxAngleChange = 0;
+        for (let i = 1; i < allPoints.length - 1; i++) {
+            const prevPoint = allPoints[i - 1];
+            const currentPoint = allPoints[i];
+            const nextPoint = allPoints[i + 1];
+            
+            const incomingBearing = this._calculateBearing(prevPoint, currentPoint);
+            const outgoingBearing = this._calculateBearing(currentPoint, nextPoint);
+            
+            let angleDiff = Math.abs(outgoingBearing - incomingBearing);
+            if (angleDiff > 180) {
+                angleDiff = 360 - angleDiff;
+            }
+            
+            maxAngleChange = Math.max(maxAngleChange, angleDiff);
+        }
+        
+        // 验证与直线路径的最大偏离
+        const maxDeviation = this._calculateMaxDeviationFromDirectPath(optimizedPoints, startPoint, endPoint);
+        const directDistance = this._calculateDistance(startPoint, endPoint);
+        const deviationRatio = maxDeviation / directDistance;
+        
+        const isValid = distanceDeviation < 0.3 && maxAngleChange < 120 && deviationRatio < 0.5;
+        
+        return {
+            is_valid: isValid,
+            distance_deviation: distanceDeviation,
+            max_angle_change: maxAngleChange,
+            max_deviation_ratio: deviationRatio,
+            total_distance: totalDistance
+        };
+    }
+    
+    /**
+     * 计算与直线路径的最大偏离距离
+     * @param {Array} intermediatePoints - 中间点数组
+     * @param {Array} startPoint - 起始点
+     * @param {Array} endPoint - 终点
+     * @returns {number} 最大偏离距离（米）
+     */
+    _calculateMaxDeviationFromDirectPath(intermediatePoints, startPoint, endPoint) {
+        let maxDeviation = 0;
+        
+        for (const point of intermediatePoints) {
+            // 计算点到起终点连线的距离
+            const deviation = this._calculateDistanceToLine(point, startPoint, endPoint);
+            maxDeviation = Math.max(maxDeviation, deviation);
+        }
+        
+        return maxDeviation;
+    }
+    
+    /**
+     * 计算点到直线的距离
+     * @param {Array} point - 目标点
+     * @param {Array} lineStart - 直线起点
+     * @param {Array} lineEnd - 直线终点
+     * @returns {number} 距离（米）
+     */
+    _calculateDistanceToLine(point, lineStart, lineEnd) {
+        // 使用点到直线距离公式
+        const A = lineEnd[1] - lineStart[1];
+        const B = lineStart[0] - lineEnd[0];
+        const C = lineEnd[0] * lineStart[1] - lineStart[0] * lineEnd[1];
+        
+        const distance = Math.abs(A * point[0] + B * point[1] + C) / Math.sqrt(A * A + B * B);
+        
+        // 转换为米（粗略估算）
+        return distance * 111000; // 1度约等于111km
+    }
+    
+    /**
+     * 应用点对点备用优化策略
+     * @param {Array} originalPoints - 原始中间点
+     * @param {Array} startPoint - 起始点
+     * @param {Array} endPoint - 终点
+     * @param {number} targetDistance - 目标距离
+     * @param {string} curveLevel - 弯道等级
+     * @returns {Array} 备用优化后的中间点
+     */
+    _applyPointToPointFallbackOptimization(originalPoints, startPoint, endPoint, targetDistance, curveLevel) {
+        // 简化策略：重新生成更简单的路径
+        return this._regenerateSimplifiedPointToPointRoute(startPoint, endPoint, targetDistance, curveLevel);
+    }
+    
+    /**
+     * 重新生成简化的点对点路线
+     * @param {Array} startPoint - 起始点
+     * @param {Array} endPoint - 终点
+     * @param {number} targetDistance - 目标距离
+     * @param {string} curveLevel - 弯道等级
+     * @returns {Array} 简化的中间点数组
+     */
+    _regenerateSimplifiedPointToPointRoute(startPoint, endPoint, targetDistance, curveLevel) {
+        const directDistance = this._calculateDistance(startPoint, endPoint);
+        const extraDistance = targetDistance - directDistance;
+        
+        if (extraDistance <= 0) {
+            return [];
+        }
+        
+        // 生成单个中间点，减少复杂性
+        const midProgress = 0.5;
+        const midPoint = [
+            startPoint[0] + (endPoint[0] - startPoint[0]) * midProgress,
+            startPoint[1] + (endPoint[1] - startPoint[1]) * midProgress
+        ];
+        
+        // 计算偏移
+        const mainBearing = this._calculateBearing(startPoint, endPoint);
+        const offsetBearing = mainBearing + 90; // 垂直偏移
+        const offsetDistance = extraDistance * 0.3; // 保守的偏移距离
+        
+        const detourPoint = this._calculatePointAtDistance(midPoint, offsetDistance, offsetBearing);
+        
+        return [detourPoint];
     }
     
     /**
@@ -2231,9 +2997,21 @@ class Blucap {
         const startAngle = startBearing || 0;
         const angleDistribution = this._calculateNaturalAngleDistribution(numPoints, curveLevel);
         
+        // 防回头路参数
+        const minAngleStep = this._calculateMinAngleStep(curveLevel);
+        const maxAngleChange = this._calculateMaxAngleChange(curveLevel);
+        let previousAngle = startAngle;
+        
         for (let i = 0; i < numPoints; i++) {
             // 计算当前点的角度（自然分布）
-            const currentAngle = startAngle + angleDistribution[i];
+            let currentAngle = startAngle + angleDistribution[i];
+            
+            // 防回头路验证和调整
+            if (i > 0) {
+                currentAngle = this._validateAndAdjustAngle(
+                    currentAngle, previousAngle, minAngleStep, maxAngleChange, i, numPoints
+                );
+            }
             
             // 使用多层半径策略，创建更自然的环形
             const radiusVariation = this._calculateCircularRadius(baseRadius, i, numPoints, curveLevel);
@@ -2244,10 +3022,30 @@ class Blucap {
             // 应用智能偏移，避免过于规则的圆形
             const enhancedPoint = this._applyCircularOffset(circularPoint, radiusVariation, curveLevel, i, currentAngle);
             
-            points.push(enhancedPoint);
+            // 验证点的方向连续性
+            if (points.length > 0) {
+                const isValidDirection = this._validateDirectionContinuity(
+                    points[points.length - 1], enhancedPoint, startPoint, previousAngle, currentAngle
+                );
+                
+                if (!isValidDirection) {
+                    // 重新调整点位置
+                    const adjustedPoint = this._adjustPointForContinuity(
+                        enhancedPoint, points[points.length - 1], startPoint, currentAngle
+                    );
+                    points.push(adjustedPoint);
+                } else {
+                    points.push(enhancedPoint);
+                }
+            } else {
+                points.push(enhancedPoint);
+            }
+            
+            previousAngle = currentAngle;
         }
         
-        return points;
+        // 最终验证整体路径的连续性
+        return this._validateOverallPathContinuity(points, startPoint, targetDistance, curveLevel);
     }
     
     /**
@@ -2282,6 +3080,79 @@ class Blucap {
     }
     
     /**
+     * 计算最小角度步长（防回头路）
+     * @param {string} curveLevel - 弯道等级
+     * @returns {number} 最小角度步长（度）
+     */
+    _calculateMinAngleStep(curveLevel) {
+        const minSteps = {
+            'low': 15,      // 低弯道：较大步长，避免急转
+            'medium': 10,   // 中弯道：适中步长
+            'high': 8       // 高弯道：较小步长，允许更多弯曲
+        };
+        return minSteps[curveLevel] || 10;
+    }
+    
+    /**
+     * 计算最大角度变化（防回头路）
+     * @param {string} curveLevel - 弯道等级
+     * @returns {number} 最大角度变化（度）
+     */
+    _calculateMaxAngleChange(curveLevel) {
+        const maxChanges = {
+            'low': 45,      // 低弯道：限制急转弯
+            'medium': 60,   // 中弯道：适中转弯
+            'high': 75      // 高弯道：允许较大转弯
+        };
+        return maxChanges[curveLevel] || 60;
+    }
+    
+    /**
+     * 验证并调整角度以防回头路
+     * @param {number} currentAngle - 当前角度
+     * @param {number} previousAngle - 前一个角度
+     * @param {number} minAngleStep - 最小角度步长
+     * @param {number} maxAngleChange - 最大角度变化
+     * @param {number} index - 当前索引
+     * @param {number} totalPoints - 总点数
+     * @returns {number} 调整后的角度
+     */
+    _validateAndAdjustAngle(currentAngle, previousAngle, minAngleStep, maxAngleChange, index, totalPoints) {
+        let adjustedAngle = currentAngle;
+        
+        // 计算角度差
+        let angleDiff = Math.abs(currentAngle - previousAngle);
+        if (angleDiff > 180) {
+            angleDiff = 360 - angleDiff;
+        }
+        
+        // 检查是否违反最小步长
+        if (angleDiff < minAngleStep) {
+            // 调整角度以满足最小步长
+            const direction = currentAngle > previousAngle ? 1 : -1;
+            adjustedAngle = previousAngle + (direction * minAngleStep);
+        }
+        
+        // 检查是否超过最大角度变化（防止急转弯）
+        angleDiff = Math.abs(adjustedAngle - previousAngle);
+        if (angleDiff > 180) {
+            angleDiff = 360 - angleDiff;
+        }
+        
+        if (angleDiff > maxAngleChange) {
+            // 限制角度变化
+            const direction = adjustedAngle > previousAngle ? 1 : -1;
+            adjustedAngle = previousAngle + (direction * maxAngleChange);
+        }
+        
+        // 确保角度在 0-360 范围内
+        while (adjustedAngle < 0) adjustedAngle += 360;
+        while (adjustedAngle >= 360) adjustedAngle -= 360;
+        
+        return adjustedAngle;
+    }
+    
+    /**
      * 生成均匀角度分布
      * @param {number} numPoints - 点数量
      * @returns {Array} 角度数组
@@ -2295,6 +3166,120 @@ class Blucap {
         }
         
         return angles;
+    }
+    
+    /**
+     * 验证方向连续性
+     * @param {Array} previousPoint - 前一个点
+     * @param {Array} currentPoint - 当前点
+     * @param {Array} startPoint - 起始点
+     * @param {number} previousAngle - 前一个角度
+     * @param {number} currentAngle - 当前角度
+     * @returns {boolean} 是否方向连续
+     */
+    _validateDirectionContinuity(previousPoint, currentPoint, startPoint, previousAngle, currentAngle) {
+        // 计算实际的方位角
+        const actualBearing = this._calculateBearing(previousPoint, currentPoint);
+        
+        // 计算期望的方位角变化
+        const expectedAngleChange = Math.abs(currentAngle - previousAngle);
+        const actualAngleChange = Math.abs(actualBearing - previousAngle);
+        
+        // 允许的角度偏差
+        const allowedDeviation = 30; // 度
+        
+        // 检查角度变化是否在合理范围内
+        const isAngleValid = Math.abs(actualAngleChange - expectedAngleChange) <= allowedDeviation;
+        
+        // 检查是否远离起始点（避免向内收缩）
+        const distanceFromStart = this._calculateDistance(startPoint, currentPoint);
+        const previousDistanceFromStart = this._calculateDistance(startPoint, previousPoint);
+        const isMovingOutward = distanceFromStart >= previousDistanceFromStart * 0.8;
+        
+        return isAngleValid && isMovingOutward;
+    }
+    
+    /**
+     * 调整点位置以保持连续性
+     * @param {Array} originalPoint - 原始点
+     * @param {Array} previousPoint - 前一个点
+     * @param {Array} startPoint - 起始点
+     * @param {number} targetAngle - 目标角度
+     * @returns {Array} 调整后的点
+     */
+    _adjustPointForContinuity(originalPoint, previousPoint, startPoint, targetAngle) {
+        // 计算从起始点到前一个点的距离
+        const previousDistance = this._calculateDistance(startPoint, previousPoint);
+        
+        // 保持相似的距离，但调整角度
+        const adjustedDistance = previousDistance * 1.1; // 略微增加距离
+        
+        // 使用目标角度计算新位置
+        return this._calculatePointAtDistance(startPoint, adjustedDistance, targetAngle);
+    }
+    
+    /**
+     * 验证整体路径连续性
+     * @param {Array} points - 路径点数组
+     * @param {Array} startPoint - 起始点
+     * @param {number} targetDistance - 目标距离
+     * @param {string} curveLevel - 弯道等级
+     * @returns {Array} 验证并可能调整后的点数组
+     */
+    _validateOverallPathContinuity(points, startPoint, targetDistance, curveLevel) {
+        if (points.length < 3) return points;
+        
+        const validatedPoints = [];
+        const maxBacktrackAngle = 120; // 最大允许的回头角度
+        
+        for (let i = 0; i < points.length; i++) {
+            if (i < 2) {
+                validatedPoints.push(points[i]);
+                continue;
+            }
+            
+            const p1 = validatedPoints[i - 2];
+            const p2 = validatedPoints[i - 1];
+            const p3 = points[i];
+            
+            // 计算转向角度
+            const bearing1 = this._calculateBearing(p1, p2);
+            const bearing2 = this._calculateBearing(p2, p3);
+            
+            let turnAngle = Math.abs(bearing2 - bearing1);
+            if (turnAngle > 180) {
+                turnAngle = 360 - turnAngle;
+            }
+            
+            // 如果转向角度过大，调整点位置
+            if (turnAngle > maxBacktrackAngle) {
+                const adjustedPoint = this._smoothTransition(p1, p2, p3, maxBacktrackAngle);
+                validatedPoints.push(adjustedPoint);
+            } else {
+                validatedPoints.push(p3);
+            }
+        }
+        
+        return validatedPoints;
+    }
+    
+    /**
+     * 平滑过渡调整
+     * @param {Array} p1 - 第一个点
+     * @param {Array} p2 - 第二个点
+     * @param {Array} p3 - 第三个点
+     * @param {number} maxAngle - 最大允许角度
+     * @returns {Array} 调整后的第三个点
+     */
+    _smoothTransition(p1, p2, p3, maxAngle) {
+        const bearing1 = this._calculateBearing(p1, p2);
+        const distance = this._calculateDistance(p2, p3);
+        
+        // 计算调整后的方位角
+        const adjustedBearing = bearing1 + (maxAngle * 0.8); // 使用80%的最大角度
+        
+        // 计算新的点位置
+        return this._calculatePointAtDistance(p2, distance, adjustedBearing);
     }
     
     /**
@@ -2499,6 +3484,10 @@ class Blucap {
         // GraphHopper API限制：最多4个中间点（加上起点和终点总共6个点，但对于点对点路线，最多4个中间点）
         numDetours = Math.min(numDetours, 4);
         
+        // 计算主方向
+        const mainBearing = this._calculateBearing(startPoint, endPoint);
+        
+        // 防回头路的绕行点生成策略
         for (let i = 0; i < numDetours; i++) {
             const progress = (i + 1) / (numDetours + 1);
             const midPoint = [
@@ -2506,18 +3495,86 @@ class Blucap {
                 startPoint[1] + (endPoint[1] - startPoint[1]) * progress
             ];
             
-            // 垂直于主方向的偏移
-            const bearing = utils._calculateBearing(startPoint, endPoint);
-            const perpBearing = bearing + 90 + (Math.random() - 0.5) * 60; // 添加随机性
-            const offsetDistance = (extraDistance / numDetours) * 0.3; // 偏移距离
+            // 计算偏移方向，确保不会产生回头路
+            // 使用固定的偏移角度，避免随机性导致的回头路
+            const offsetAngle = i % 2 === 0 ? 90 : -90; // 交替左右偏移
+            const perpBearing = mainBearing + offsetAngle;
+            
+            // 根据弯道等级和额外距离计算合理的偏移距离
+            let offsetDistance;
+            if (curveLevel === "high") {
+                offsetDistance = (extraDistance / numDetours) * 0.4; // 高弯道等级，更大偏移
+            } else if (curveLevel === "medium") {
+                offsetDistance = (extraDistance / numDetours) * 0.3; // 中等偏移
+            } else {
+                offsetDistance = (extraDistance / numDetours) * 0.2; // 低弯道等级，较小偏移
+            }
+            
+            // 限制最大偏移距离，避免过度绕行
+            offsetDistance = Math.min(offsetDistance, directDistance * 0.5);
             
             const detourPoint = this._calculatePointAtDistance(midPoint, offsetDistance, perpBearing);
-            points.push(detourPoint);
+            
+            // 验证绕行点不会导致回头路
+            if (this._validateDetourPoint(detourPoint, startPoint, endPoint, points)) {
+                points.push(detourPoint);
+            } else {
+                // 如果验证失败，尝试减小偏移距离
+                const reducedOffsetDistance = offsetDistance * 0.5;
+                const fallbackPoint = this._calculatePointAtDistance(midPoint, reducedOffsetDistance, perpBearing);
+                if (this._validateDetourPoint(fallbackPoint, startPoint, endPoint, points)) {
+                    points.push(fallbackPoint);
+                }
+                // 如果仍然失败，跳过这个绕行点
+            }
         }
         
         return points;
     }
 
+    /**
+     * 验证绕行点是否会导致回头路
+     */
+    _validateDetourPoint(detourPoint, startPoint, endPoint, existingPoints) {
+        // 检查绕行点与起点和终点的距离关系
+        const distanceToStart = this._calculateDistance(startPoint, detourPoint);
+        const distanceToEnd = this._calculateDistance(detourPoint, endPoint);
+        const directDistance = this._calculateDistance(startPoint, endPoint);
+        
+        // 绕行点不应该距离起点或终点过近
+        const minDistance = directDistance * 0.1;
+        if (distanceToStart < minDistance || distanceToEnd < minDistance) {
+            return false;
+        }
+        
+        // 检查与已有绕行点的距离，避免点过于密集
+        for (const existingPoint of existingPoints) {
+            const distanceToExisting = this._calculateDistance(detourPoint, existingPoint);
+            if (distanceToExisting < minDistance) {
+                return false;
+            }
+        }
+        
+        // 检查角度，确保不会产生急转弯或回头路
+        if (existingPoints.length > 0) {
+            const lastPoint = existingPoints[existingPoints.length - 1];
+            const bearing1 = this._calculateBearing(lastPoint, detourPoint);
+            const bearing2 = this._calculateBearing(detourPoint, endPoint);
+            
+            let angleDiff = Math.abs(bearing2 - bearing1);
+            if (angleDiff > 180) {
+                angleDiff = 360 - angleDiff;
+            }
+            
+            // 如果角度变化过大（超过120度），可能导致回头路
+            if (angleDiff > 120) {
+                return false;
+            }
+        }
+        
+        return true;
+    }
+    
     /**
      * 执行路线请求
      */
@@ -2599,8 +3656,20 @@ class Blucap {
      * 发送路线请求到 GraphHopper API
      */
     async _requestRoute(points, curveLevel) {
-        // 转换坐标格式：从 [lat, lng] 转换为 GraphHopper API 期望的 [lng, lat]
-        const convertedPoints = points.map(point => [point[1], point[0]]);
+        // GraphHopper API 期望的坐标格式是 [lng, lat]，需要转换
+        const convertedPoints = points.map(point => {
+            // 确保坐标是有效的数字 - point格式是[lat, lng]
+            const lat = typeof point[0] === 'number' ? point[0] : parseFloat(point[0]);
+            const lng = typeof point[1] === 'number' ? point[1] : parseFloat(point[1]);
+            
+            // 验证坐标范围 - 注意：lat是纬度(-90到90)，lng是经度(-180到180)
+            if (isNaN(lat) || isNaN(lng) || lat < -90 || lat > 90 || lng < -180 || lng > 180) {
+                throw new Error(`Invalid coordinates: lat=${lat}, lng=${lng} (expected lat: -90 to 90, lng: -180 to 180)`);
+            }
+            
+            // GraphHopper API 需要 [lng, lat] 格式，所以从[lat, lng]转换为[lng, lat]
+            return [lng, lat];
+        });
         
         const routeRequest = {
             points: convertedPoints,
@@ -2710,8 +3779,9 @@ class Blucap {
      */
     _calculatePointAtDistance(point, distance, bearing) {
         const R = 6371000; // 地球半径(米)
-        const lat1Rad = point[1] * Math.PI / 180;
-        const lng1Rad = point[0] * Math.PI / 180;
+        // 输入point格式: [lat, lng]
+        const lat1Rad = point[0] * Math.PI / 180;
+        const lng1Rad = point[1] * Math.PI / 180;
         const bearingRad = bearing * Math.PI / 180;
         
         const lat2Rad = Math.asin(Math.sin(lat1Rad) * Math.cos(distance/R) +
@@ -2720,7 +3790,8 @@ class Blucap {
         const lng2Rad = lng1Rad + Math.atan2(Math.sin(bearingRad) * Math.sin(distance/R) * Math.cos(lat1Rad),
                                           Math.cos(distance/R) - Math.sin(lat1Rad) * Math.sin(lat2Rad));
         
-        return [lng2Rad * 180 / Math.PI, lat2Rad * 180 / Math.PI];
+        // 返回格式: [lat, lng] 保持与输入格式一致
+        return [lat2Rad * 180 / Math.PI, lng2Rad * 180 / Math.PI];
     }
     
     /**
@@ -2756,12 +3827,18 @@ class Blucap {
         const routeStart = coordinates[0];
         const routeEnd = coordinates[coordinates.length - 1];
         
-        // 优化的闭合距离计算 - 使用高精度算法
-        const closureDistance = utils._calculateHighPrecisionDistance(routeStart, routeEnd);
+        // 增强的闭合距离计算 - 使用多重验证算法
+        const closureAnalysis = this._performEnhancedClosureAnalysis({
+            routeStart,
+            routeEnd,
+            startPoint,
+            coordinates,
+            targetDistance
+        });
         
         // 动态计算最大可接受距离 - 更严格的标准
         const maxAcceptableDistance = utils._calculateDynamicClosureThreshold(targetDistance);
-        const closureRatio = Math.max(0, 1 - (closureDistance / maxAcceptableDistance));
+        const closureRatio = Math.max(0, 1 - (closureAnalysis.primary_closure_distance / maxAcceptableDistance));
         
         // 验证起点是否接近原始起点
         const startPointDistance = utils._calculateHighPrecisionDistance(startPoint, routeStart);
@@ -2776,13 +3853,13 @@ class Blucap {
             startPoint,
             coordinates,
             targetDistance,
-            closureDistance,
+            closureDistance: closureAnalysis.primary_closure_distance,
             startPointDistance
         });
         
         // 综合评估环形质量
         const overallValidity = this._evaluateEnhancedCircularQuality({
-            closureDistance,
+            closureDistance: closureAnalysis.primary_closure_distance,
             startPointDistance,
             geometryAnalysis,
             targetDistance,
@@ -2792,7 +3869,8 @@ class Blucap {
         
         return {
             is_valid: overallValidity.is_valid,
-            closure_distance: closureDistance,
+            is_closed: overallValidity.is_valid, // 添加is_closed字段以兼容前端显示
+            closure_distance: closureAnalysis.primary_closure_distance,
             closure_ratio: closureRatio,
             start_point_deviation: startPointDistance,
             route_start: routeStart,
@@ -2801,9 +3879,478 @@ class Blucap {
             geometry_analysis: geometryAnalysis,
             circular_quality_score: overallValidity.quality_score,
             closure_quality_metrics: closureQualityMetrics,
-            closure_grade: utils._calculateClosureGrade(closureDistance, targetDistance),
-            recommendations: overallValidity.recommendations,
-            max_acceptable_distance: maxAcceptableDistance
+            closure_grade: utils._calculateClosureGrade(closureAnalysis.primary_closure_distance, targetDistance),
+            recommendations: [...overallValidity.recommendations, ...closureAnalysis.precision_grade.precision_recommendations],
+            max_acceptable_distance: maxAcceptableDistance,
+            enhanced_closure_analysis: closureAnalysis
+        };
+    }
+    
+    // 辅助函数实现
+    _calculateClosureTrend(endSegment, startSegment) {
+        // 计算末端段朝向起始段的趋势
+        const distances = [];
+        for (let i = 0; i < endSegment.length - 1; i++) {
+            let minDist = Infinity;
+            for (let j = 0; j < startSegment.length; j++) {
+                const dist = utils._calculateHighPrecisionDistance(endSegment[i], startSegment[j]);
+                minDist = Math.min(minDist, dist);
+            }
+            distances.push(minDist);
+        }
+        
+        // 分析距离变化趋势
+        let improvingCount = 0;
+        for (let i = 1; i < distances.length; i++) {
+            if (distances[i] < distances[i-1]) improvingCount++;
+        }
+        
+        return {
+            is_improving: improvingCount > distances.length / 2,
+            improvement_ratio: improvingCount / (distances.length - 1),
+            distance_progression: distances
+        };
+    }
+    
+    _analyzeSegmentCharacteristics(segment, type) {
+        if (segment.length < 2) return { error: '段长度不足' };
+        
+        // 计算段的方向一致性
+        const bearings = [];
+        for (let i = 0; i < segment.length - 1; i++) {
+            bearings.push(utils._calculateBearing(segment[i], segment[i + 1]));
+        }
+        
+        // 计算方向变化
+        let totalChange = 0;
+        for (let i = 1; i < bearings.length; i++) {
+            totalChange += Math.abs(this._normalizeAngleDifference(bearings[i] - bearings[i-1]));
+        }
+        
+        const averageDirectionChange = bearings.length > 1 ? totalChange / (bearings.length - 1) : 0;
+        
+        return {
+            segment_type: type,
+            length: segment.length,
+            average_direction_change: averageDirectionChange,
+            direction_consistency: Math.max(0, 1 - (averageDirectionChange / 90)), // 90度为完全不一致
+            bearings: bearings
+        };
+    }
+    
+    _assessClosureImprovementPotential(minDistance, targetDistance) {
+        const relativeDistance = minDistance / targetDistance;
+        if (relativeDistance < 0.001) return 'excellent';
+        if (relativeDistance < 0.005) return 'good';
+        if (relativeDistance < 0.01) return 'moderate';
+        if (relativeDistance < 0.02) return 'poor';
+        return 'very_poor';
+    }
+    
+    _normalizeAngleDifference(angleDiff) {
+        while (angleDiff > 180) angleDiff -= 360;
+        while (angleDiff < -180) angleDiff += 360;
+        return angleDiff;
+    }
+    
+    _gradeDirectionConsistency(score) {
+        if (score >= 0.9) return 'excellent';
+        if (score >= 0.7) return 'good';
+        if (score >= 0.5) return 'moderate';
+        if (score >= 0.3) return 'poor';
+        return 'very_poor';
+    }
+    
+    _calculatePathCircularity(coordinates, center) {
+        if (coordinates.length < 3) return 0;
+        
+        const distances = coordinates.map(coord => 
+            utils._calculateHighPrecisionDistance(coord, center)
+        );
+        
+        const avgDistance = distances.reduce((sum, d) => sum + d, 0) / distances.length;
+        const variance = distances.reduce((sum, d) => sum + Math.pow(d - avgDistance, 2), 0) / distances.length;
+        const standardDeviation = Math.sqrt(variance);
+        
+        // 圆形度 = 1 - (标准差 / 平均距离)
+        return Math.max(0, 1 - (standardDeviation / avgDistance));
+    }
+    
+    _gradeStability(score) {
+        if (score >= 0.9) return 'excellent';
+        if (score >= 0.7) return 'good';
+        if (score >= 0.5) return 'moderate';
+        if (score >= 0.3) return 'poor';
+        return 'very_poor';
+    }
+    
+    _analyzeClosureTrendProgression(progressiveDistances) {
+        if (progressiveDistances.length < 2) return { trend: 'insufficient_data' };
+        
+        let convergingCount = 0;
+        for (let i = 1; i < progressiveDistances.length; i++) {
+            if (progressiveDistances[i].distance_to_start < progressiveDistances[i-1].distance_to_start) {
+                convergingCount++;
+            }
+        }
+        
+        const convergenceRatio = convergingCount / (progressiveDistances.length - 1);
+        
+        return {
+            trend: convergenceRatio > 0.6 ? 'converging' : convergenceRatio > 0.4 ? 'mixed' : 'diverging',
+            convergence_ratio: convergenceRatio,
+            total_segments: progressiveDistances.length
+        };
+    }
+    
+    _evaluateFinalApproachQuality(coordinates, startPoint) {
+        const finalSegmentLength = Math.min(10, Math.floor(coordinates.length * 0.1));
+        const finalSegment = coordinates.slice(-finalSegmentLength);
+        
+        // 计算最终接近的方向一致性
+        const approachBearings = [];
+        for (let i = 0; i < finalSegment.length - 1; i++) {
+            approachBearings.push(utils._calculateBearing(finalSegment[i], finalSegment[i + 1]));
+        }
+        
+        // 计算朝向起点的理想方向
+        const idealBearing = utils._calculateBearing(finalSegment[finalSegment.length - 1], startPoint);
+        
+        // 计算实际方向与理想方向的差异
+        const actualBearing = approachBearings[approachBearings.length - 1];
+        const bearingDifference = Math.abs(this._normalizeAngleDifference(actualBearing - idealBearing));
+        
+        return {
+            approach_quality: Math.max(0, 1 - (bearingDifference / 180)),
+            bearing_difference: bearingDifference,
+            ideal_bearing: idealBearing,
+            actual_bearing: actualBearing
+        };
+    }
+    
+    _calculateConvergenceConsistency(progressiveDistances) {
+        if (progressiveDistances.length < 3) return 0;
+        
+        // 计算距离变化的一致性
+        const changes = [];
+        for (let i = 1; i < progressiveDistances.length; i++) {
+            changes.push(progressiveDistances[i].distance_to_start - progressiveDistances[i-1].distance_to_start);
+        }
+        
+        // 计算变化的标准差（越小越一致）
+        const avgChange = changes.reduce((sum, c) => sum + c, 0) / changes.length;
+        const variance = changes.reduce((sum, c) => sum + Math.pow(c - avgChange, 2), 0) / changes.length;
+        const standardDeviation = Math.sqrt(variance);
+        
+        // 一致性分数（标准差越小，一致性越高）
+        const maxExpectedStdDev = Math.abs(avgChange) * 2; // 预期最大标准差
+        return Math.max(0, 1 - (standardDeviation / Math.max(maxExpectedStdDev, 1)));
+    }
+    
+    _gradePrecision(score) {
+        if (score >= 0.95) return 'excellent';
+        if (score >= 0.85) return 'very_good';
+        if (score >= 0.7) return 'good';
+        if (score >= 0.5) return 'moderate';
+        if (score >= 0.3) return 'poor';
+        return 'very_poor';
+    }
+    
+    _generatePrecisionRecommendations(precisionScores) {
+        const recommendations = [];
+        
+        if (precisionScores.distancePrecision < 0.7) {
+            recommendations.push('建议调整路径生成算法以减少起终点距离');
+        }
+        if (precisionScores.multiPointPrecision < 0.7) {
+            recommendations.push('建议优化路径末端的接近策略');
+        }
+        if (precisionScores.directionPrecision < 0.7) {
+            recommendations.push('建议改进路径方向的连续性控制');
+        }
+        if (precisionScores.geometricPrecision < 0.7) {
+            recommendations.push('建议增强路径的几何稳定性');
+        }
+        if (precisionScores.progressivePrecision < 0.7) {
+            recommendations.push('建议改进渐进式闭合的一致性');
+        }
+        
+        return recommendations;
+    }
+    
+    _calculateOverallClosureQuality(params) {
+        const { primaryClosureDistance, multiPointAnalysis, directionConsistency, geometricStability, progressiveClosure } = params;
+        
+        // 综合质量评分
+        const qualityScore = (
+            (1 - Math.min(1, primaryClosureDistance / 1000)) * 0.3 + // 主要闭合距离
+            (1 - Math.min(1, multiPointAnalysis.min_closure_distance / 500)) * 0.25 + // 多点闭合
+            directionConsistency.confidence * 0.2 + // 方向一致性
+            geometricStability.stability_score * 0.15 + // 几何稳定性
+            progressiveClosure.convergence_consistency * 0.1 // 渐进一致性
+        );
+        
+        return {
+            overall_score: qualityScore,
+            quality_grade: this._gradeStability(qualityScore),
+            is_high_quality: qualityScore >= 0.8
+        };
+    }
+    
+    /**
+     * 执行增强的闭合分析
+     * @param {Object} params - 分析参数
+     * @returns {Object} 闭合分析结果
+     */
+    _performEnhancedClosureAnalysis(params) {
+        const { routeStart, routeEnd, startPoint, coordinates, targetDistance } = params;
+        
+        // 主要闭合距离计算（高精度）- 计算路径终点与原始起始点的距离
+        const primaryClosureDistance = utils._calculateHighPrecisionDistance(routeEnd, startPoint);
+        
+        // 多点闭合验证 - 检查路径末端多个点的闭合情况
+        const multiPointAnalysis = this._analyzeMultiPointClosure(coordinates, startPoint, targetDistance);
+        
+        // 路径方向一致性检查
+        const directionConsistency = this._validateClosureDirection(coordinates, startPoint);
+        
+        // 闭合路径的几何稳定性分析
+        const geometricStability = this._analyzeClosureStability(coordinates, routeStart, routeEnd, targetDistance);
+        
+        // 渐进式闭合质量评估
+        const progressiveClosure = this._evaluateProgressiveClosure(coordinates, startPoint);
+        
+        // 闭合精度等级评估
+        const precisionGrade = this._calculateClosurePrecisionGrade({
+            primaryDistance: primaryClosureDistance,
+            multiPointAnalysis,
+            directionConsistency,
+            geometricStability,
+            progressiveClosure,
+            targetDistance
+        });
+        
+        return {
+            primary_closure_distance: primaryClosureDistance,
+            multi_point_analysis: multiPointAnalysis,
+            direction_consistency: directionConsistency,
+            geometric_stability: geometricStability,
+            progressive_closure: progressiveClosure,
+            precision_grade: precisionGrade,
+            overall_closure_quality: this._calculateOverallClosureQuality({
+                primaryClosureDistance,
+                multiPointAnalysis,
+                directionConsistency,
+                geometricStability,
+                progressiveClosure
+            })
+        };
+    }
+    
+    /**
+     * 分析多点闭合情况
+     * @param {Array} coordinates - 路径坐标
+     * @param {Object} startPoint - 起始点
+     * @param {number} targetDistance - 目标距离
+     * @returns {Object} 多点分析结果
+     */
+    _analyzeMultiPointClosure(coordinates, startPoint, targetDistance) {
+        const endSegmentLength = Math.min(10, Math.floor(coordinates.length * 0.1)); // 分析末端10%的点
+        const startSegmentLength = Math.min(10, Math.floor(coordinates.length * 0.1)); // 分析起始10%的点
+        
+        const endSegment = coordinates.slice(-endSegmentLength);
+        const startSegment = coordinates.slice(0, startSegmentLength);
+        
+        // 计算末端段到起始段的最小距离
+        let minClosureDistance = Infinity;
+        let bestClosurePair = null;
+        
+        for (let i = 0; i < endSegment.length; i++) {
+            for (let j = 0; j < startSegment.length; j++) {
+                const distance = utils._calculateHighPrecisionDistance(endSegment[i], startSegment[j]);
+                if (distance < minClosureDistance) {
+                    minClosureDistance = distance;
+                    bestClosurePair = {
+                        end_point: endSegment[i],
+                        start_point: startSegment[j],
+                        end_index: coordinates.length - endSegmentLength + i,
+                        start_index: j
+                    };
+                }
+            }
+        }
+        
+        // 计算闭合趋势
+        const closureTrend = this._calculateClosureTrend(endSegment, startSegment);
+        
+        return {
+            min_closure_distance: minClosureDistance,
+            best_closure_pair: bestClosurePair,
+            closure_trend: closureTrend,
+            end_segment_analysis: this._analyzeSegmentCharacteristics(endSegment, 'end'),
+            start_segment_analysis: this._analyzeSegmentCharacteristics(startSegment, 'start'),
+            closure_improvement_potential: this._assessClosureImprovementPotential(minClosureDistance, targetDistance)
+        };
+    }
+    
+    /**
+     * 验证闭合方向一致性
+     * @param {Array} coordinates - 路径坐标
+     * @param {Object} startPoint - 起始点
+     * @returns {Object} 方向一致性结果
+     */
+    _validateClosureDirection(coordinates, startPoint) {
+        if (coordinates.length < 3) {
+            return { is_consistent: false, confidence: 0, error: '路径点不足' };
+        }
+        
+        // 计算路径起始方向
+        const startDirection = utils._calculateBearing(coordinates[0], coordinates[1]);
+        
+        // 计算路径结束方向（朝向起点）
+        const endToStartDirection = utils._calculateBearing(
+            coordinates[coordinates.length - 1], 
+            coordinates[0]
+        );
+        
+        // 计算路径末端的实际方向
+        const actualEndDirection = utils._calculateBearing(
+            coordinates[coordinates.length - 2], 
+            coordinates[coordinates.length - 1]
+        );
+        
+        // 计算方向差异
+        const directionDifference = Math.abs(this._normalizeAngleDifference(actualEndDirection - endToStartDirection));
+        
+        // 评估方向一致性
+        const consistencyScore = Math.max(0, 1 - (directionDifference / 180));
+        const isConsistent = directionDifference < 45; // 45度以内认为一致
+        
+        return {
+            is_consistent: isConsistent,
+            confidence: consistencyScore,
+            start_direction: startDirection,
+            end_to_start_direction: endToStartDirection,
+            actual_end_direction: actualEndDirection,
+            direction_difference: directionDifference,
+            consistency_grade: this._gradeDirectionConsistency(consistencyScore)
+        };
+    }
+    
+    /**
+     * 分析闭合稳定性
+     * @param {Array} coordinates - 路径坐标
+     * @param {Object} routeStart - 路径起点
+     * @param {Object} routeEnd - 路径终点
+     * @param {number} targetDistance - 目标距离
+     * @returns {Object} 稳定性分析结果
+     */
+    _analyzeClosureStability(coordinates, routeStart, routeEnd, targetDistance) {
+        // 计算路径中心点
+        const pathCenter = this._calculateRouteCenter(coordinates);
+        
+        // 分析起终点相对于中心的位置
+        const startToCenterDistance = utils._calculateHighPrecisionDistance(routeStart, pathCenter);
+        const endToCenterDistance = utils._calculateHighPrecisionDistance(routeEnd, pathCenter);
+        
+        // 计算半径一致性
+        const radiusConsistency = 1 - Math.abs(startToCenterDistance - endToCenterDistance) / Math.max(startToCenterDistance, endToCenterDistance);
+        
+        // 分析路径的圆形度
+        const circularity = this._calculatePathCircularity(coordinates, pathCenter);
+        
+        // 计算闭合稳定性分数
+        const stabilityScore = (radiusConsistency * 0.4 + circularity * 0.6);
+        
+        return {
+            stability_score: stabilityScore,
+            radius_consistency: radiusConsistency,
+            circularity: circularity,
+            path_center: pathCenter,
+            start_to_center_distance: startToCenterDistance,
+            end_to_center_distance: endToCenterDistance,
+            stability_grade: this._gradeStability(stabilityScore)
+        };
+    }
+    
+    /**
+     * 评估渐进式闭合质量
+     * @param {Array} coordinates - 路径坐标
+     * @param {Object} startPoint - 起始点
+     * @returns {Object} 渐进式闭合结果
+     */
+    _evaluateProgressiveClosure(coordinates, startPoint) {
+        const progressiveDistances = [];
+        const segmentSize = Math.max(1, Math.floor(coordinates.length / 20)); // 分20段分析
+        
+        for (let i = segmentSize; i < coordinates.length; i += segmentSize) {
+            const currentPoint = coordinates[i];
+            const distanceToStart = utils._calculateHighPrecisionDistance(currentPoint, startPoint);
+            progressiveDistances.push({
+                index: i,
+                distance_to_start: distanceToStart,
+                progress_ratio: i / coordinates.length
+            });
+        }
+        
+        // 分析闭合趋势
+        const closureTrend = this._analyzeClosureTrendProgression(progressiveDistances);
+        
+        return {
+            progressive_distances: progressiveDistances,
+            closure_trend: closureTrend,
+            final_approach_quality: this._evaluateFinalApproachQuality(coordinates, startPoint),
+            convergence_consistency: this._calculateConvergenceConsistency(progressiveDistances)
+        };
+    }
+    
+    /**
+     * 计算闭合精度等级
+     * @param {Object} params - 计算参数
+     * @returns {Object} 精度等级结果
+     */
+    _calculateClosurePrecisionGrade(params) {
+        const { primaryDistance, multiPointAnalysis, directionConsistency, geometricStability, progressiveClosure, targetDistance } = params;
+        
+        // 距离精度评分
+        const distancePrecision = Math.max(0, 1 - (primaryDistance / (targetDistance * 0.01))); // 1%容差
+        
+        // 多点精度评分
+        const multiPointPrecision = Math.max(0, 1 - (multiPointAnalysis.min_closure_distance / (targetDistance * 0.005))); // 0.5%容差
+        
+        // 方向精度评分
+        const directionPrecision = directionConsistency.confidence;
+        
+        // 几何精度评分
+        const geometricPrecision = geometricStability.stability_score;
+        
+        // 渐进精度评分
+        const progressivePrecision = progressiveClosure.convergence_consistency;
+        
+        // 综合精度评分
+        const overallPrecision = (
+            distancePrecision * 0.3 +
+            multiPointPrecision * 0.25 +
+            directionPrecision * 0.2 +
+            geometricPrecision * 0.15 +
+            progressivePrecision * 0.1
+        );
+        
+        return {
+            overall_precision: overallPrecision,
+            distance_precision: distancePrecision,
+            multi_point_precision: multiPointPrecision,
+            direction_precision: directionPrecision,
+            geometric_precision: geometricPrecision,
+            progressive_precision: progressivePrecision,
+            precision_grade: this._gradePrecision(overallPrecision),
+            precision_recommendations: this._generatePrecisionRecommendations({
+                distancePrecision,
+                multiPointPrecision,
+                directionPrecision,
+                geometricPrecision,
+                progressivePrecision
+            })
         };
     }
     
@@ -2869,28 +4416,37 @@ class Blucap {
         // 路径连续性评分
         const continuityScore = utils._evaluatePathContinuity(closureMetrics);
         
-        // 综合质量评分 - 调整权重分配
+        // 综合质量评分 - 调整权重分配，添加安全检查
+        const safeClosureScore = isNaN(closureScore) ? 0 : closureScore;
+        const safeStartDeviationScore = isNaN(startDeviationScore) ? 0 : startDeviationScore;
+        const safeGeometryScore = isNaN(geometryScore) ? 0 : geometryScore;
+        const safeClosureMetricsScore = isNaN(closureMetricsScore) ? 0 : closureMetricsScore;
+        const safeContinuityScore = isNaN(continuityScore) ? 0 : continuityScore;
+        
         const qualityScore = (
-            closureScore * 0.35 +           // 闭合度权重增加
-            startDeviationScore * 0.25 +    // 起点偏差权重增加
-            geometryScore * 0.25 +          // 几何形状权重
-            closureMetricsScore * 0.10 +    // 闭合指标权重
-            continuityScore * 0.05          // 连续性权重
+            safeClosureScore * 0.35 +           // 闭合度权重增加
+            safeStartDeviationScore * 0.25 +    // 起点偏差权重增加
+            safeGeometryScore * 0.25 +          // 几何形状权重
+            safeClosureMetricsScore * 0.10 +    // 闭合指标权重
+            safeContinuityScore * 0.05          // 连续性权重
         );
+        
+        // 确保最终质量评分是有效数字
+        const finalQualityScore = isNaN(qualityScore) ? 0 : Math.max(0, Math.min(1, qualityScore));
         
         // 生成详细的改进建议
         const recommendations = utils._generateEnhancedRecommendations({
-            closureScore,
-            startDeviationScore,
+            closureScore: safeClosureScore,
+            startDeviationScore: safeStartDeviationScore,
             geometryAnalysis,
             closureMetrics,
-            continuityScore,
+            continuityScore: safeContinuityScore,
             targetDistance
         });
         
         // 更严格的验证标准
         const enhancedValidation = utils._validateEnhancedClosure({
-            qualityScore,
+            qualityScore: finalQualityScore,
             closureDistance,
             startPointDistance,
             targetDistance,
@@ -2900,17 +4456,17 @@ class Blucap {
         
         return {
             is_valid: enhancedValidation.passed,
-            quality_score: qualityScore,
+            quality_score: finalQualityScore,
             enhanced_validation: enhancedValidation,
             component_scores: {
-                closure: closureScore,
-                start_deviation: startDeviationScore,
-                geometry: geometryScore,
-                closure_metrics: closureMetricsScore,
-                continuity: continuityScore
+                closure: safeClosureScore,
+                start_deviation: safeStartDeviationScore,
+                geometry: safeGeometryScore,
+                closure_metrics: safeClosureMetricsScore,
+                continuity: safeContinuityScore
             },
             recommendations: [...recommendations, ...enhancedValidation.improvement_suggestions],
-            quality_grade: utils._calculateQualityGrade(qualityScore),
+            quality_grade: utils._calculateQualityGrade(finalQualityScore),
             validation_details: {
                 overall_validation_score: enhancedValidation.overall_score,
                 validation_breakdown: enhancedValidation.validation_scores,
@@ -2925,9 +4481,10 @@ class Blucap {
      * @param {Array} startPoint - 起始点
      * @param {number} targetDistance - 目标距离
      * @param {string} curveLevel - 弯道等级
+     * @param {boolean} enableProgressiveOptimization - 是否启用渐进式优化
      * @returns {Object|null} 优化后的路线结果或null
      */
-    async _optimizeCircularClosure(originalRequest, startPoint, targetDistance, curveLevel) {
+    async _optimizeCircularClosure(originalRequest, startPoint, targetDistance, curveLevel, enableProgressiveOptimization = true) {
         const maxRetries = 5; // 增加重试次数
         const dynamicThreshold = utils._calculateDynamicClosureThreshold(targetDistance);
         let bestResult = null;
@@ -2938,7 +4495,7 @@ class Blucap {
         for (let retry = 0; retry < maxRetries; retry++) {
             try {
                 // 渐进式优化策略
-                const optimizationStrategy = this._selectOptimizationStrategy(retry, targetDistance, curveLevel);
+                const optimizationStrategy = utils._selectOptimizationStrategy(retry, targetDistance, curveLevel);
                 
                 // 生成优化的中间点
                 const optimizedPoints = this._generateProgressiveOptimizedPoints(
@@ -3005,18 +4562,22 @@ class Blucap {
             return bestResult;
         }
         
-        // 尝试渐进式闭合优化
-        console.log('常规优化未达到理想效果，启动渐进式闭合优化...');
-        const progressiveResult = await this._performProgressiveClosureOptimization(
-            originalRequest, 
-            startPoint, 
-            targetDistance, 
-            curveLevel
-        );
-        
-        if (progressiveResult) {
-            console.log('渐进式闭合优化成功');
-            return progressiveResult;
+        // 根据参数决定是否尝试渐进式闭合优化
+        if (enableProgressiveOptimization) {
+            console.log('常规优化未达到理想效果，启动渐进式闭合优化...');
+            const progressiveResult = await this._performProgressiveClosureOptimization(
+                originalRequest, 
+                startPoint, 
+                targetDistance, 
+                curveLevel
+            );
+            
+            if (progressiveResult) {
+                console.log('渐进式闭合优化成功');
+                return progressiveResult;
+            }
+        } else {
+            console.log('渐进式优化已禁用，跳过渐进式闭合优化');
         }
         
         console.warn('闭合优化失败，未能达到可接受的闭合质量');
@@ -3586,73 +5147,347 @@ class Blucap {
              };
          }
          
+         // 增强的回头路检测参数
+         const detectionParams = this._calculateAdaptiveDetectionParams(coordinates.length, routeResult.paths[0].distance);
          const backtrackSegments = [];
-         const minBacktrackDistance = 100; // 降低最小折返检测距离(米)
-         const angleThreshold = 120; // 降低角度阈值(度)，提高敏感度
-         const microBacktrackThreshold = 90; // 微小回头路阈值(度)
          
-         // 多层次分析路径段，检测不同程度的折返
-         for (let i = 2; i < coordinates.length - 1; i++) {
-             const prevPoint = coordinates[i - 2];
-             const currentPoint = coordinates[i - 1];
-             const nextPoint = coordinates[i];
+         // 多层次分析：滑动窗口检测
+         const windowSizes = [3, 5, 7]; // 不同窗口大小检测不同规模的回头路
+         
+         for (const windowSize of windowSizes) {
+             const segments = this._detectBacktrackingWithWindow(coordinates, windowSize, detectionParams);
+             backtrackSegments.push(...segments);
+         }
+         
+         // 去重和合并重叠的回头路段
+         const mergedSegments = this._mergeOverlappingBacktracks(backtrackSegments);
+         
+         // 计算增强的回头路指标
+         const analysis = this._calculateEnhancedBacktrackMetrics(mergedSegments, coordinates, routeResult.paths[0].distance);
+         
+         return {
+             has_backtracking: mergedSegments.length > 0,
+             backtrack_ratio: analysis.backtrack_ratio,
+             backtrack_segments: mergedSegments,
+             total_segments: mergedSegments.length,
+             total_backtrack_distance: analysis.total_backtrack_distance,
+             severity_score: analysis.severity_score,
+             efficiency_impact: analysis.efficiency_impact,
+             path_quality_score: analysis.path_quality_score,
+             recommendations: analysis.recommendations,
+             total_points: coordinates.length
+         };
+     }
+     
+     /**
+      * 计算自适应检测参数
+      * @param {number} pointCount - 路径点数量
+      * @param {number} totalDistance - 总距离
+      * @returns {Object} 检测参数
+      */
+     _calculateAdaptiveDetectionParams(pointCount, totalDistance) {
+         // 根据路径复杂度调整检测参数
+         const complexity = pointCount / (totalDistance / 1000); // 点密度
+         
+         return {
+             minBacktrackDistance: Math.max(50, Math.min(200, totalDistance * 0.01)), // 自适应最小距离
+             severeAngleThreshold: complexity > 10 ? 110 : 120, // 高密度路径更敏感
+             moderateAngleThreshold: complexity > 10 ? 80 : 90,
+             microAngleThreshold: complexity > 10 ? 60 : 70,
+             distanceWeight: complexity > 15 ? 0.7 : 0.5, // 高密度时更重视距离
+             angleWeight: complexity > 15 ? 0.3 : 0.5
+         };
+     }
+     
+     /**
+      * 使用滑动窗口检测回头路
+      * @param {Array} coordinates - 坐标数组
+      * @param {number} windowSize - 窗口大小
+      * @param {Object} params - 检测参数
+      * @returns {Array} 检测到的回头路段
+      */
+     _detectBacktrackingWithWindow(coordinates, windowSize, params) {
+         const segments = [];
+         
+         for (let i = 0; i <= coordinates.length - windowSize; i++) {
+             const window = coordinates.slice(i, i + windowSize);
+             const backtrack = this._analyzeWindowForBacktracking(window, i, params);
              
-             // 计算前后两段的方位角
-             const bearing1 = utils._calculateBearing(prevPoint, currentPoint);
-                const bearing2 = utils._calculateBearing(currentPoint, nextPoint);
-             
-             // 计算角度差
-             let angleDiff = Math.abs(bearing2 - bearing1);
-             if (angleDiff > 180) {
-                 angleDiff = 360 - angleDiff;
-             }
-             
-             const segmentDistance = this._calculateDistance(prevPoint, nextPoint);
-             
-             // 多层次检测：严重回头路和微小回头路
-             let isBacktrack = false;
-             let backtrackType = 'none';
-             
-             if (angleDiff > angleThreshold && segmentDistance > minBacktrackDistance) {
-                 // 严重回头路检测
-                 isBacktrack = this._verifyBacktrackSegment(
-                     coordinates, i - 2, i, minBacktrackDistance
-                 );
-                 backtrackType = 'severe';
-             } else if (angleDiff > microBacktrackThreshold && segmentDistance > minBacktrackDistance * 0.5) {
-                 // 微小回头路检测（更敏感）
-                 isBacktrack = this._verifyMicroBacktrack(
-                     coordinates, i - 2, i, minBacktrackDistance * 0.5
-                 );
-                 backtrackType = 'micro';
-             }
-             
-             if (isBacktrack) {
-                 backtrackSegments.push({
-                     start_index: i - 2,
-                     end_index: i,
-                     angle_change: angleDiff,
-                     distance: segmentDistance,
-                     type: backtrackType,
-                     severity: this._calculateBacktrackSeverity(angleDiff, segmentDistance)
-                 });
+             if (backtrack) {
+                 segments.push(backtrack);
              }
          }
          
-         // 计算折返比率
-         const totalDistance = routeResult.paths[0].distance || 0;
-         const backtrackDistance = backtrackSegments.reduce((sum, segment) => sum + segment.distance, 0);
-         const backtrackRatio = totalDistance > 0 ? backtrackDistance / totalDistance : 0;
+         return segments;
+     }
+     
+     /**
+      * 分析窗口内的回头路模式
+      * @param {Array} window - 窗口内的坐标
+      * @param {number} startIndex - 起始索引
+      * @param {Object} params - 检测参数
+      * @returns {Object|null} 回头路信息或null
+      */
+     _analyzeWindowForBacktracking(window, startIndex, params) {
+         if (window.length < 3) return null;
+         
+         // 计算窗口内的方向变化
+         const bearings = [];
+         for (let i = 0; i < window.length - 1; i++) {
+             bearings.push(this._calculateBearing(window[i], window[i + 1]));
+         }
+         
+         // 分析方向变化模式
+         const directionChanges = [];
+         for (let i = 0; i < bearings.length - 1; i++) {
+             let change = Math.abs(bearings[i + 1] - bearings[i]);
+             if (change > 180) change = 360 - change;
+             directionChanges.push(change);
+         }
+         
+         // 检测回头路模式
+         const maxChange = Math.max(...directionChanges);
+         const avgChange = directionChanges.reduce((sum, change) => sum + change, 0) / directionChanges.length;
+         
+         // 计算窗口总距离
+         const windowDistance = this._calculatePathDistance(window);
+         
+         // 判断是否为回头路
+         let backtrackType = null;
+         let severity = 0;
+         
+         if (maxChange > params.severeAngleThreshold && windowDistance > params.minBacktrackDistance) {
+             backtrackType = 'severe';
+             severity = this._calculateAdvancedSeverity(maxChange, avgChange, windowDistance, params);
+         } else if (maxChange > params.moderateAngleThreshold && windowDistance > params.minBacktrackDistance * 0.7) {
+             backtrackType = 'moderate';
+             severity = this._calculateAdvancedSeverity(maxChange, avgChange, windowDistance, params) * 0.7;
+         } else if (maxChange > params.microAngleThreshold && windowDistance > params.minBacktrackDistance * 0.5) {
+             backtrackType = 'micro';
+             severity = this._calculateAdvancedSeverity(maxChange, avgChange, windowDistance, params) * 0.4;
+         }
+         
+         if (backtrackType) {
+             return {
+                 start_index: startIndex,
+                 end_index: startIndex + window.length - 1,
+                 window_size: window.length,
+                 max_angle_change: maxChange,
+                 avg_angle_change: avgChange,
+                 distance: windowDistance,
+                 type: backtrackType,
+                 severity: severity,
+                 direction_consistency: this._calculateDirectionConsistency(bearings),
+                 path_efficiency: this._calculatePathEfficiency(window)
+             };
+         }
+         
+         return null;
+     }
+     
+     /**
+      * 计算高级严重程度
+      * @param {number} maxChange - 最大角度变化
+      * @param {number} avgChange - 平均角度变化
+      * @param {number} distance - 距离
+      * @param {Object} params - 参数
+      * @returns {number} 严重程度分数
+      */
+     _calculateAdvancedSeverity(maxChange, avgChange, distance, params) {
+         const angleScore = (maxChange / 180) * params.angleWeight;
+         const distanceScore = Math.min(1, distance / (params.minBacktrackDistance * 2)) * params.distanceWeight;
+         const consistencyPenalty = (avgChange / maxChange) * 0.3; // 持续性回头路更严重
+         
+         return Math.min(1, angleScore + distanceScore + consistencyPenalty);
+     }
+     
+     /**
+      * 计算路径距离
+      * @param {Array} path - 路径坐标
+      * @returns {number} 总距离
+      */
+     _calculatePathDistance(path) {
+         let distance = 0;
+         for (let i = 0; i < path.length - 1; i++) {
+             distance += this._calculateDistance(path[i], path[i + 1]);
+         }
+         return distance;
+     }
+     
+     /**
+      * 计算方向一致性
+      * @param {Array} bearings - 方位角数组
+      * @returns {number} 一致性分数 (0-1)
+      */
+     _calculateDirectionConsistency(bearings) {
+         if (bearings.length < 2) return 1;
+         
+         let totalVariation = 0;
+         for (let i = 0; i < bearings.length - 1; i++) {
+             let diff = Math.abs(bearings[i + 1] - bearings[i]);
+             if (diff > 180) diff = 360 - diff;
+             totalVariation += diff;
+         }
+         
+         const avgVariation = totalVariation / (bearings.length - 1);
+         return Math.max(0, 1 - (avgVariation / 90)); // 90度作为基准
+     }
+     
+     /**
+      * 计算路径效率
+      * @param {Array} path - 路径坐标
+      * @returns {number} 效率分数 (0-1)
+      */
+     _calculatePathEfficiency(path) {
+         if (path.length < 2) return 1;
+         
+         const actualDistance = this._calculatePathDistance(path);
+         const directDistance = this._calculateDistance(path[0], path[path.length - 1]);
+         
+         return directDistance > 0 ? Math.min(1, directDistance / actualDistance) : 0;
+     }
+     
+     /**
+      * 合并重叠的回头路段
+      * @param {Array} segments - 回头路段数组
+      * @returns {Array} 合并后的回头路段
+      */
+     _mergeOverlappingBacktracks(segments) {
+         if (segments.length <= 1) return segments;
+         
+         // 按起始索引排序
+         segments.sort((a, b) => a.start_index - b.start_index);
+         
+         const merged = [];
+         let current = segments[0];
+         
+         for (let i = 1; i < segments.length; i++) {
+             const next = segments[i];
+             
+             // 检查是否重叠
+             if (current.end_index >= next.start_index) {
+                 // 合并段落
+                 current = {
+                     start_index: current.start_index,
+                     end_index: Math.max(current.end_index, next.end_index),
+                     window_size: Math.max(current.window_size, next.window_size),
+                     max_angle_change: Math.max(current.max_angle_change, next.max_angle_change),
+                     avg_angle_change: (current.avg_angle_change + next.avg_angle_change) / 2,
+                     distance: current.distance + next.distance,
+                     type: this._selectMoreSevereType(current.type, next.type),
+                     severity: Math.max(current.severity, next.severity),
+                     direction_consistency: Math.min(current.direction_consistency, next.direction_consistency),
+                     path_efficiency: Math.min(current.path_efficiency, next.path_efficiency)
+                 };
+             } else {
+                 merged.push(current);
+                 current = next;
+             }
+         }
+         
+         merged.push(current);
+         return merged;
+     }
+     
+     /**
+      * 选择更严重的回头路类型
+      * @param {string} type1 - 类型1
+      * @param {string} type2 - 类型2
+      * @returns {string} 更严重的类型
+      */
+     _selectMoreSevereType(type1, type2) {
+         const severity = { 'micro': 1, 'moderate': 2, 'severe': 3 };
+         return severity[type1] >= severity[type2] ? type1 : type2;
+     }
+     
+     /**
+      * 计算增强的回头路指标
+      * @param {Array} segments - 回头路段
+      * @param {Array} coordinates - 坐标数组
+      * @param {number} totalDistance - 总距离
+      * @returns {Object} 分析结果
+      */
+     _calculateEnhancedBacktrackMetrics(segments, coordinates, totalDistance) {
+         const totalBacktrackDistance = segments.reduce((sum, segment) => sum + segment.distance, 0);
+         const backtrackRatio = totalDistance > 0 ? totalBacktrackDistance / totalDistance : 0;
+         
+         // 计算综合严重程度
+         const severityScore = segments.length > 0 ? 
+             segments.reduce((sum, segment) => sum + segment.severity, 0) / segments.length : 0;
+         
+         // 计算效率影响
+         const efficiencyImpact = this._calculateEfficiencyImpact(segments, coordinates, totalDistance);
+         
+         // 计算路径质量分数
+         const pathQualityScore = this._calculatePathQualityScore({
+             backtrackRatio,
+             severityScore,
+             efficiencyImpact,
+             segmentCount: segments.length
+         });
+         
+         // 生成改进建议
+         const recommendations = this._generateBacktrackRecommendations(segments, pathQualityScore);
          
          return {
-             has_backtracking: backtrackSegments.length > 0,
              backtrack_ratio: backtrackRatio,
-             backtrack_segments: backtrackSegments,
-             total_segments: backtrackSegments.length,
-             total_backtrack_distance: backtrackDistance,
-             severity_score: this._calculateOverallBacktrackSeverity(backtrackSegments),
-             total_points: coordinates.length
+             total_backtrack_distance: totalBacktrackDistance,
+             severity_score: severityScore,
+             efficiency_impact: efficiencyImpact,
+             path_quality_score: pathQualityScore,
+             recommendations
          };
+     }
+     
+     /**
+      * 计算效率影响
+      * @param {Array} segments - 回头路段
+      * @param {Array} coordinates - 坐标数组
+      * @param {number} totalDistance - 总距离
+      * @returns {number} 效率影响分数 (0-1)
+      */
+     _calculateEfficiencyImpact(segments, coordinates, totalDistance) {
+         if (segments.length === 0) return 0;
+         
+         // 计算理想直线距离
+         const directDistance = this._calculateDistance(coordinates[0], coordinates[coordinates.length - 1]);
+         
+         // 计算回头路造成的额外距离
+         const extraDistance = segments.reduce((sum, segment) => {
+             return sum + (segment.distance * (1 - segment.path_efficiency));
+         }, 0);
+         
+         return totalDistance > 0 ? Math.min(1, extraDistance / totalDistance) : 0;
+     }
+     
+     /**
+      * 生成回头路改进建议
+      * @param {Array} segments - 回头路段
+      * @param {number} qualityScore - 质量分数
+      * @returns {Array} 建议列表
+      */
+     _generateBacktrackRecommendations(segments, qualityScore) {
+         const recommendations = [];
+         
+         if (qualityScore < 0.7) {
+             recommendations.push('路径质量较低，建议重新生成路线');
+         }
+         
+         const severeSegments = segments.filter(s => s.type === 'severe');
+         if (severeSegments.length > 0) {
+             recommendations.push(`发现${severeSegments.length}个严重回头路段，建议优化中间点生成策略`);
+         }
+         
+         const lowEfficiencySegments = segments.filter(s => s.path_efficiency < 0.5);
+         if (lowEfficiencySegments.length > 0) {
+             recommendations.push('部分路段效率较低，建议增加方向连续性检查');
+         }
+         
+         if (segments.length > 3) {
+             recommendations.push('回头路段过多，建议调整弯道等级或目标距离');
+         }
+         
+         return recommendations;
      }
      
      /**
@@ -4432,20 +6267,31 @@ class Blucap {
                }
            };
            
-           // 计算基础评分
+           // 计算基础评分 - 添加NaN检查
            let baseScore = 0;
            Object.keys(baseScores).forEach(key => {
-               baseScore += baseScores[key] * weights.base[key];
+               const score = baseScores[key];
+               if (isNaN(score) || !isFinite(score)) {
+                   baseScores[key] = 0.5; // 默认中等评分
+               }
+               baseScore += (baseScores[key] || 0) * weights.base[key];
            });
            
-           // 计算高级评分
+           // 计算高级评分 - 添加NaN检查
            let advancedScore = 0;
            Object.keys(advancedScores).forEach(key => {
-               advancedScore += advancedScores[key] * weights.advanced[key];
+               const score = advancedScores[key];
+               if (isNaN(score) || !isFinite(score)) {
+                   advancedScores[key] = 0.5; // 默认中等评分
+               }
+               advancedScore += (advancedScores[key] || 0) * weights.advanced[key];
            });
            
-           // 综合评分 (基础评分占70%，高级评分占30%)
-           const overallScore = baseScore * 0.7 + advancedScore * 0.3;
+           // 综合评分 (基础评分占70%，高级评分占30%) - 添加最终NaN检查
+           let overallScore = baseScore * 0.7 + advancedScore * 0.3;
+           if (isNaN(overallScore) || !isFinite(overallScore)) {
+               overallScore = 0.5; // 默认中等评分
+           }
            
            // 计算质量等级和建议
            const qualityGrade = utils._calculateQualityGrade(overallScore);
@@ -4489,7 +6335,18 @@ class Blucap {
         */
        _scoreDistancePrecision(routeResult, targetDistance) {
            const actualDistance = routeResult.paths?.[0]?.distance || 0;
+           
+           // 防止除零错误和NaN值
+           if (!targetDistance || targetDistance <= 0) {
+               return actualDistance > 0 ? 0.5 : 1.0;
+           }
+           
            const deviation = Math.abs(actualDistance - targetDistance) / targetDistance;
+           
+           // 确保deviation是有效数字
+           if (isNaN(deviation) || !isFinite(deviation)) {
+               return 0.5;
+           }
            
            if (deviation <= 0.05) return 1.0; // 5%以内
            if (deviation <= 0.10) return 0.8; // 10%以内
@@ -4544,19 +6401,573 @@ class Blucap {
            
            if (coordinates.length < 2) return 0;
            
-           // 计算直线距离与实际距离的比率
+           // 使用增强的路径效率评估算法
+           return this._calculateEnhancedRouteEfficiency({
+               coordinates,
+               actualDistance,
+               targetDistance,
+               routeResult
+           });
+       }
+       
+       /**
+        * 计算增强的路径效率评估
+        * @param {Object} params - 评估参数
+        * @returns {number} 效率评分 (0-1)
+        */
+       _calculateEnhancedRouteEfficiency(params) {
+           const { coordinates, actualDistance, targetDistance, routeResult } = params;
+           
+           // 1. 距离效率评估 (30%)
+           const distanceEfficiency = this._evaluateDistanceEfficiency(actualDistance, targetDistance);
+           
+           // 2. 时间效率评估 (25%)
+           const timeEfficiency = this._evaluateTimeEfficiency(coordinates, actualDistance);
+           
+           // 3. 路径质量效率 (20%)
+           const pathQualityEfficiency = this._evaluatePathQualityEfficiency(coordinates);
+           
+           // 4. 环形闭合效率 (15%)
+           const closureEfficiency = this._evaluateClosureEfficiency(coordinates);
+           
+           // 5. 导航效率 (10%)
+           const navigationEfficiency = this._evaluateNavigationEfficiency(coordinates, actualDistance);
+           
+           // 加权计算总效率
+           const totalEfficiency = (
+               distanceEfficiency * 0.30 +
+               timeEfficiency * 0.25 +
+               pathQualityEfficiency * 0.20 +
+               closureEfficiency * 0.15 +
+               navigationEfficiency * 0.10
+           );
+           
+           return Math.max(0, Math.min(1, totalEfficiency));
+       }
+       
+       /**
+        * 评估距离效率
+        * @param {number} actualDistance - 实际距离
+        * @param {number} targetDistance - 目标距离
+        * @returns {number} 距离效率评分
+        */
+       _evaluateDistanceEfficiency(actualDistance, targetDistance) {
+           const deviation = Math.abs(actualDistance - targetDistance) / targetDistance;
+           
+           if (deviation <= 0.02) return 1.0;      // 2%以内 - 优秀
+           if (deviation <= 0.05) return 0.95;     // 5%以内 - 很好
+           if (deviation <= 0.10) return 0.85;     // 10%以内 - 良好
+           if (deviation <= 0.15) return 0.70;     // 15%以内 - 一般
+           if (deviation <= 0.25) return 0.50;     // 25%以内 - 较差
+           return 0.20;                            // 超过25% - 很差
+       }
+       
+       /**
+        * 评估时间效率
+        * @param {Array} coordinates - 路径坐标
+        * @param {number} actualDistance - 实际距离
+        * @returns {number} 时间效率评分
+        */
+       _evaluateTimeEfficiency(coordinates, actualDistance) {
+           // 计算路径复杂度对时间的影响
+           const pathComplexity = this._calculatePathTimeComplexity(coordinates);
+           
+           // 计算平均速度潜力
+           const speedPotential = this._calculateSpeedPotential(coordinates, actualDistance);
+           
+           // 计算交通效率
+           const trafficEfficiency = this._estimateTrafficEfficiency(coordinates);
+           
+           return (pathComplexity + speedPotential + trafficEfficiency) / 3;
+       }
+       
+       /**
+        * 计算路径时间复杂度
+        * @param {Array} coordinates - 路径坐标
+        * @returns {number} 时间复杂度评分
+        */
+       _calculatePathTimeComplexity(coordinates) {
+           if (coordinates.length < 3) return 0.5;
+           
+           let totalTurnAngle = 0;
+           let sharpTurns = 0;
+           
+           for (let i = 1; i < coordinates.length - 1; i++) {
+               const angle = Math.abs(this._calculateTurnAngle(
+                   coordinates[i - 1],
+                   coordinates[i],
+                   coordinates[i + 1]
+               ));
+               
+               totalTurnAngle += angle;
+               if (angle > 90) sharpTurns++;
+           }
+           
+           const avgTurnAngle = totalTurnAngle / (coordinates.length - 2);
+           const sharpTurnRatio = sharpTurns / (coordinates.length - 2);
+           
+           // 转角越小，时间效率越高
+           const angleScore = Math.max(0, 1 - avgTurnAngle / 180);
+           const sharpTurnScore = Math.max(0, 1 - sharpTurnRatio * 2);
+           
+           return (angleScore + sharpTurnScore) / 2;
+       }
+       
+       /**
+        * 计算速度潜力
+        * @param {Array} coordinates - 路径坐标
+        * @param {number} actualDistance - 实际距离
+        * @returns {number} 速度潜力评分
+        */
+       _calculateSpeedPotential(coordinates, actualDistance) {
+           // 计算路径段长度分布
+           const segmentLengths = [];
+           for (let i = 1; i < coordinates.length; i++) {
+               const segmentLength = this._calculateDistance(
+                   { lat: coordinates[i-1][1], lng: coordinates[i-1][0] },
+                   { lat: coordinates[i][1], lng: coordinates[i][0] }
+               );
+               segmentLengths.push(segmentLength);
+           }
+           
+           // 计算长段比例（有利于保持速度）
+           const longSegments = segmentLengths.filter(length => length > 500).length;
+           const longSegmentRatio = longSegments / segmentLengths.length;
+           
+           // 计算段长度一致性
+           const avgLength = segmentLengths.reduce((sum, len) => sum + len, 0) / segmentLengths.length;
+           const lengthVariance = segmentLengths.reduce((sum, len) => sum + Math.pow(len - avgLength, 2), 0) / segmentLengths.length;
+           const consistencyScore = Math.max(0, 1 - Math.sqrt(lengthVariance) / avgLength);
+           
+           return (longSegmentRatio + consistencyScore) / 2;
+       }
+       
+       /**
+        * 估算交通效率
+        * @param {Array} coordinates - 路径坐标
+        * @returns {number} 交通效率评分
+        */
+       _estimateTrafficEfficiency(coordinates) {
+           // 基于路径特征估算交通效率
+           // 这里使用简化的启发式方法
+           
+           // 计算路径的直线性（更直的路径通常交通效率更高）
+           const straightnessScore = this._calculatePathStraightness(coordinates);
+           
+           // 计算路径密度（点密度适中的路径通常效率更高）
+           const densityScore = this._calculateOptimalDensityScore(coordinates);
+           
+           return (straightnessScore + densityScore) / 2;
+       }
+       
+       /**
+        * 计算路径直线性
+        * @param {Array} coordinates - 路径坐标
+        * @returns {number} 直线性评分
+        */
+       _calculatePathStraightness(coordinates) {
+           if (coordinates.length < 3) return 1.0;
+           
            const startPoint = coordinates[0];
            const endPoint = coordinates[coordinates.length - 1];
-           const directDistance = this._calculateDistance(startPoint, endPoint);
+           const directDistance = this._calculateDistance(
+               { lat: startPoint[1], lng: startPoint[0] },
+               { lat: endPoint[1], lng: endPoint[0] }
+           );
+           
+           let pathDistance = 0;
+           for (let i = 1; i < coordinates.length; i++) {
+               pathDistance += this._calculateDistance(
+                   { lat: coordinates[i-1][1], lng: coordinates[i-1][0] },
+                   { lat: coordinates[i][1], lng: coordinates[i][0] }
+               );
+           }
            
            // 对于环形路线，直线距离应该很小
-           const circularityScore = directDistance < 500 ? 1.0 : Math.max(0, 1 - directDistance / 2000);
+           if (directDistance < 500) {
+               // 环形路线的直线性基于路径的圆形度
+               return this._calculateCircularStraightness(coordinates);
+           }
            
-           // 路径复杂度评分
-           const complexityRatio = coordinates.length / (actualDistance / 100); // 每100米的点数
-           const complexityScore = complexityRatio > 0.5 && complexityRatio < 3 ? 1.0 : 0.6;
+           const straightnessRatio = directDistance / pathDistance;
+           return Math.min(1.0, straightnessRatio * 1.2); // 轻微加权
+       }
+       
+       /**
+        * 计算环形路径的直线性
+        * @param {Array} coordinates - 路径坐标
+        * @returns {number} 环形直线性评分
+        */
+       _calculateCircularStraightness(coordinates) {
+           const center = this._calculateRouteCenter(coordinates);
+           const distances = coordinates.map(coord => 
+               this._calculateDistance(
+                   { lat: center[1], lng: center[0] },
+                   { lat: coord[1], lng: coord[0] }
+               )
+           );
            
-           return (circularityScore + complexityScore) / 2;
+           const avgDistance = distances.reduce((sum, d) => sum + d, 0) / distances.length;
+           const variance = distances.reduce((sum, d) => sum + Math.pow(d - avgDistance, 2), 0) / distances.length;
+           const stdDev = Math.sqrt(variance);
+           
+           // 标准差越小，圆形度越好
+           return Math.max(0, 1 - (stdDev / avgDistance));
+       }
+       
+       /**
+        * 计算最优密度评分
+        * @param {Array} coordinates - 路径坐标
+        * @returns {number} 密度评分
+        */
+       _calculateOptimalDensityScore(coordinates) {
+           const pointCount = coordinates.length;
+           let totalDistance = 0;
+           
+           for (let i = 1; i < coordinates.length; i++) {
+               totalDistance += this._calculateDistance(
+                   { lat: coordinates[i-1][1], lng: coordinates[i-1][0] },
+                   { lat: coordinates[i][1], lng: coordinates[i][0] }
+               );
+           }
+           
+           const pointDensity = pointCount / (totalDistance / 1000); // 每公里点数
+           
+           // 最优密度范围：5-15点/公里
+           if (pointDensity >= 5 && pointDensity <= 15) return 1.0;
+           if (pointDensity >= 3 && pointDensity <= 20) return 0.8;
+           if (pointDensity >= 1 && pointDensity <= 30) return 0.6;
+           return 0.4;
+       }
+       
+       /**
+        * 评估路径质量效率
+        * @param {Array} coordinates - 路径坐标
+        * @returns {number} 路径质量效率评分
+        */
+       _evaluatePathQualityEfficiency(coordinates) {
+           // 计算路径平滑度
+           const smoothnessScore = this._calculatePathSmoothness(coordinates);
+           
+           // 计算路径一致性
+           const consistencyScore = this._calculatePathConsistency(coordinates);
+           
+           // 计算路径可预测性
+           const predictabilityScore = this._calculatePathPredictability(coordinates);
+           
+           return (smoothnessScore + consistencyScore + predictabilityScore) / 3;
+       }
+       
+       /**
+        * 计算路径平滑度
+        * @param {Array} coordinates - 路径坐标
+        * @returns {number} 平滑度评分
+        */
+       _calculatePathSmoothness(coordinates) {
+           if (coordinates.length < 3) return 1.0;
+           
+           let totalAngleChange = 0;
+           let maxAngleChange = 0;
+           
+           for (let i = 1; i < coordinates.length - 1; i++) {
+               const angleChange = Math.abs(this._calculateTurnAngle(
+                   coordinates[i - 1],
+                   coordinates[i],
+                   coordinates[i + 1]
+               ));
+               
+               totalAngleChange += angleChange;
+               maxAngleChange = Math.max(maxAngleChange, angleChange);
+           }
+           
+           const avgAngleChange = totalAngleChange / (coordinates.length - 2);
+           
+           // 平均角度变化越小，最大角度变化越小，平滑度越高
+           const avgScore = Math.max(0, 1 - avgAngleChange / 90);
+           const maxScore = Math.max(0, 1 - maxAngleChange / 180);
+           
+           return (avgScore + maxScore) / 2;
+       }
+       
+       /**
+        * 计算路径一致性
+        * @param {Array} coordinates - 路径坐标
+        * @returns {number} 一致性评分
+        */
+       _calculatePathConsistency(coordinates) {
+           if (coordinates.length < 4) return 1.0;
+           
+           const segmentLengths = [];
+           const turnAngles = [];
+           
+           // 计算段长度
+           for (let i = 1; i < coordinates.length; i++) {
+               const length = this._calculateDistance(
+                   { lat: coordinates[i-1][1], lng: coordinates[i-1][0] },
+                   { lat: coordinates[i][1], lng: coordinates[i][0] }
+               );
+               segmentLengths.push(length);
+           }
+           
+           // 计算转角
+           for (let i = 1; i < coordinates.length - 1; i++) {
+               const angle = this._calculateTurnAngle(
+                   coordinates[i - 1],
+                   coordinates[i],
+                   coordinates[i + 1]
+               );
+               turnAngles.push(Math.abs(angle));
+           }
+           
+           // 计算长度一致性
+           const lengthConsistency = this._calculateVarianceScore(segmentLengths);
+           
+           // 计算角度一致性
+           const angleConsistency = this._calculateVarianceScore(turnAngles);
+           
+           return (lengthConsistency + angleConsistency) / 2;
+       }
+       
+       /**
+        * 计算方差评分
+        * @param {Array} values - 数值数组
+        * @returns {number} 方差评分
+        */
+       _calculateVarianceScore(values) {
+           if (values.length < 2) return 1.0;
+           
+           const mean = values.reduce((sum, val) => sum + val, 0) / values.length;
+           const variance = values.reduce((sum, val) => sum + Math.pow(val - mean, 2), 0) / values.length;
+           const stdDev = Math.sqrt(variance);
+           
+           // 变异系数越小，一致性越好
+           const coefficientOfVariation = mean > 0 ? stdDev / mean : 0;
+           return Math.max(0, 1 - coefficientOfVariation);
+       }
+       
+       /**
+        * 计算路径可预测性
+        * @param {Array} coordinates - 路径坐标
+        * @returns {number} 可预测性评分
+        */
+       _calculatePathPredictability(coordinates) {
+           if (coordinates.length < 5) return 1.0;
+           
+           let predictabilityScore = 0;
+           let validPredictions = 0;
+           
+           // 使用滑动窗口预测下一个点的位置
+           for (let i = 3; i < coordinates.length - 1; i++) {
+               const predicted = this._predictNextPoint(
+                   coordinates[i - 3],
+                   coordinates[i - 2],
+                   coordinates[i - 1]
+               );
+               
+               const actual = coordinates[i];
+               const predictionError = this._calculateDistance(
+                   { lat: predicted[1], lng: predicted[0] },
+                   { lat: actual[1], lng: actual[0] }
+               );
+               
+               // 预测误差越小，可预测性越高
+               const accuracy = Math.max(0, 1 - predictionError / 1000); // 1km作为参考
+               predictabilityScore += accuracy;
+               validPredictions++;
+           }
+           
+           return validPredictions > 0 ? predictabilityScore / validPredictions : 0.5;
+       }
+       
+       /**
+        * 预测下一个点
+        * @param {Array} p1 - 点1
+        * @param {Array} p2 - 点2
+        * @param {Array} p3 - 点3
+        * @returns {Array} 预测的下一个点
+        */
+       _predictNextPoint(p1, p2, p3) {
+           // 使用线性外推法预测下一个点
+           const dx1 = p2[0] - p1[0];
+           const dy1 = p2[1] - p1[1];
+           const dx2 = p3[0] - p2[0];
+           const dy2 = p3[1] - p2[1];
+           
+           // 计算加速度
+           const ddx = dx2 - dx1;
+           const ddy = dy2 - dy1;
+           
+           // 预测下一个点
+           const nextX = p3[0] + dx2 + ddx;
+           const nextY = p3[1] + dy2 + ddy;
+           
+           return [nextX, nextY];
+       }
+       
+       /**
+        * 评估环形闭合效率
+        * @param {Array} coordinates - 路径坐标
+        * @returns {number} 闭合效率评分
+        */
+       _evaluateClosureEfficiency(coordinates) {
+           if (coordinates.length < 3) return 0;
+           
+           const startPoint = coordinates[0];
+           const endPoint = coordinates[coordinates.length - 1];
+           
+           // 计算闭合距离
+           const closureDistance = this._calculateDistance(
+               { lat: startPoint[1], lng: startPoint[0] },
+               { lat: endPoint[1], lng: endPoint[0] }
+           );
+           
+           // 计算路径总长度
+           let totalDistance = 0;
+           for (let i = 1; i < coordinates.length; i++) {
+               totalDistance += this._calculateDistance(
+                   { lat: coordinates[i-1][1], lng: coordinates[i-1][0] },
+                   { lat: coordinates[i][1], lng: coordinates[i][0] }
+               );
+           }
+           
+           // 闭合效率 = 1 - (闭合距离 / 路径总长度的合理比例)
+           const closureRatio = closureDistance / totalDistance;
+           
+           if (closureRatio <= 0.01) return 1.0;      // 1%以内 - 优秀
+           if (closureRatio <= 0.02) return 0.95;     // 2%以内 - 很好
+           if (closureRatio <= 0.05) return 0.85;     // 5%以内 - 良好
+           if (closureRatio <= 0.10) return 0.70;     // 10%以内 - 一般
+           return Math.max(0.2, 1 - closureRatio * 5); // 动态评分
+       }
+       
+       /**
+        * 评估导航效率
+        * @param {Array} coordinates - 路径坐标
+        * @param {number} actualDistance - 实际距离
+        * @returns {number} 导航效率评分
+        */
+       _evaluateNavigationEfficiency(coordinates, actualDistance) {
+           // 计算路径复杂度对导航的影响
+           const navigationComplexity = this._calculateNavigationComplexity(coordinates);
+           
+           // 计算路径清晰度
+           const pathClarity = this._calculatePathClarity(coordinates);
+           
+           // 计算距离合理性
+           const distanceReasonableness = this._calculateDistanceReasonableness(actualDistance);
+           
+           return (navigationComplexity + pathClarity + distanceReasonableness) / 3;
+       }
+       
+       /**
+        * 计算导航复杂度
+        * @param {Array} coordinates - 路径坐标
+        * @returns {number} 导航复杂度评分
+        */
+       _calculateNavigationComplexity(coordinates) {
+           if (coordinates.length < 3) return 1.0;
+           
+           let complexTurns = 0;
+           let totalTurns = 0;
+           
+           for (let i = 1; i < coordinates.length - 1; i++) {
+               const angle = Math.abs(this._calculateTurnAngle(
+                   coordinates[i - 1],
+                   coordinates[i],
+                   coordinates[i + 1]
+               ));
+               
+               totalTurns++;
+               if (angle > 45) complexTurns++; // 大于45度的转弯被认为是复杂的
+           }
+           
+           const complexityRatio = totalTurns > 0 ? complexTurns / totalTurns : 0;
+           return Math.max(0, 1 - complexityRatio);
+       }
+       
+       /**
+        * 计算路径清晰度
+        * @param {Array} coordinates - 路径坐标
+        * @returns {number} 路径清晰度评分
+        */
+       _calculatePathClarity(coordinates) {
+           // 基于路径的规律性和可理解性
+           const regularity = this._calculatePathRegularity(coordinates);
+           const simplicity = this._calculatePathSimplicity(coordinates);
+           
+           return (regularity + simplicity) / 2;
+       }
+       
+       /**
+        * 计算路径规律性
+        * @param {Array} coordinates - 路径坐标
+        * @returns {number} 规律性评分
+        */
+       _calculatePathRegularity(coordinates) {
+           if (coordinates.length < 4) return 1.0;
+           
+           // 计算相邻段的方向变化规律性
+           const bearings = [];
+           for (let i = 1; i < coordinates.length; i++) {
+               const bearing = this._calculateBearing(
+                   { lat: coordinates[i-1][1], lng: coordinates[i-1][0] },
+                   { lat: coordinates[i][1], lng: coordinates[i][0] }
+               );
+               bearings.push(bearing);
+           }
+           
+           // 计算方向变化的规律性
+           const bearingChanges = [];
+           for (let i = 1; i < bearings.length; i++) {
+               let change = bearings[i] - bearings[i-1];
+               // 处理角度跨越问题
+               if (change > 180) change -= 360;
+               if (change < -180) change += 360;
+               bearingChanges.push(Math.abs(change));
+           }
+           
+           // 变化越小且越一致，规律性越好
+           const avgChange = bearingChanges.reduce((sum, change) => sum + change, 0) / bearingChanges.length;
+           return Math.max(0, 1 - avgChange / 90); // 90度作为参考
+       }
+       
+       /**
+        * 计算路径简单性
+        * @param {Array} coordinates - 路径坐标
+        * @returns {number} 简单性评分
+        */
+       _calculatePathSimplicity(coordinates) {
+           const pointDensity = coordinates.length;
+           let totalDistance = 0;
+           
+           for (let i = 1; i < coordinates.length; i++) {
+               totalDistance += this._calculateDistance(
+                   { lat: coordinates[i-1][1], lng: coordinates[i-1][0] },
+                   { lat: coordinates[i][1], lng: coordinates[i][0] }
+               );
+           }
+           
+           const pointsPerKm = pointDensity / (totalDistance / 1000);
+           
+           // 适中的点密度表示简单性
+           if (pointsPerKm >= 3 && pointsPerKm <= 10) return 1.0;
+           if (pointsPerKm >= 2 && pointsPerKm <= 15) return 0.8;
+           return 0.6;
+       }
+       
+       /**
+        * 计算距离合理性
+        * @param {number} actualDistance - 实际距离
+        * @returns {number} 距离合理性评分
+        */
+       _calculateDistanceReasonableness(actualDistance) {
+           // 基于距离范围评估合理性
+           const distanceKm = actualDistance / 1000;
+           
+           if (distanceKm >= 1 && distanceKm <= 50) return 1.0;    // 1-50km - 很合理
+           if (distanceKm >= 0.5 && distanceKm <= 100) return 0.9; // 0.5-100km - 合理
+           if (distanceKm >= 0.2 && distanceKm <= 200) return 0.7; // 0.2-200km - 一般
+           return 0.5; // 其他情况
        }
        
        /**
@@ -4648,6 +7059,41 @@ class Blucap {
                sumLng / coordinates.length,
                sumLat / coordinates.length
            ];
+       }
+       
+       /**
+        * 计算路径质量分数（用于回头路检测）
+        * @param {Object} scoreParams - 评分参数
+        * @returns {number} 质量分数 (0-1)
+        */
+       _calculatePathQualityScore(scoreParams) {
+           const {
+               backtrackRatio = 0,
+               severityScore = 0,
+               efficiencyImpact = 0,
+               segmentCount = 0
+           } = scoreParams;
+           
+           // 基础质量分数（从1开始，根据问题扣分）
+           let qualityScore = 1.0;
+           
+           // 回头路比率惩罚（0-0.4分扣除）
+           const backtrackPenalty = Math.min(0.4, backtrackRatio * 2);
+           qualityScore -= backtrackPenalty;
+           
+           // 严重程度惩罚（0-0.3分扣除）
+           const severityPenalty = Math.min(0.3, severityScore * 0.6);
+           qualityScore -= severityPenalty;
+           
+           // 效率影响惩罚（0-0.2分扣除）
+           const efficiencyPenalty = Math.min(0.2, efficiencyImpact * 0.4);
+           qualityScore -= efficiencyPenalty;
+           
+           // 回头路段数量惩罚（0-0.1分扣除）
+           const countPenalty = Math.min(0.1, (segmentCount / 10) * 0.1);
+           qualityScore -= countPenalty;
+           
+           return Math.max(0, Math.min(1, qualityScore));
        }
        
        /**

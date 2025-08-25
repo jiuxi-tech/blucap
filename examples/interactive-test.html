@@ -523,7 +523,7 @@
                 console.log('开始使用新API生成环形路线...');
                 
                 const result = await funRouteGenerator.generateFunRoute({
-                    start_point: [lng, lat], // 注意：新API使用 [lng, lat] 格式
+                    start_point: [lat, lng], // 修正：系统内部使用 [lat, lng] 格式
                     target_distance: distance * 1000, // 转换为米
                     curve_level: curveLevel,
                     route_type: "roundtrip",
@@ -545,7 +545,7 @@
                     if (result.route_info.quality_score) {
                         const score = result.route_info.quality_score;
                         output += `质量评分:\n`;
-                        output += `- 总体评分: ${(score.overall_score * 100).toFixed(1)}% (${score.overall_grade})\n`;
+                        output += `- 总体评分: ${score.overall_score ? (score.overall_score * 100).toFixed(1) : 'N/A'}% (${score.overall_grade || 'N/A'})\n`;
                         if (score.base_scores) {
                             output += `- 环形闭合: ${(score.base_scores.closure_quality * 100).toFixed(1)}%\n`;
                             output += `- 折返避免: ${(score.base_scores.backtrack_avoidance * 100).toFixed(1)}%\n`;
@@ -617,8 +617,8 @@
                 console.log('开始生成点对点路线...');
                 
                 const result = await funRouteGenerator.generateFunRoute({
-                    start_point: [startLng, startLat], // [lng, lat] 格式
-                    end_point: [endLng, endLat], // [lng, lat] 格式
+                    start_point: [startLat, startLng], // 修正：系统内部使用 [lat, lng] 格式
+                    end_point: [endLat, endLng], // 修正：系统内部使用 [lat, lng] 格式
                     target_distance: distance * 1000, // 转换为米
                     curve_level: curveLevel,
                     route_type: "point_to_point"
@@ -688,7 +688,7 @@
             try {
                 const startLatLng = startMarker.getLatLng();
                 let params = {
-                    start_point: [startLatLng.lng, startLatLng.lat], // [lng, lat] 格式
+                    start_point: [startLatLng.lat, startLatLng.lng], // [lat, lng] 格式
                     target_distance: distance * 1000, // 转换为米
                     curve_level: curveLevel,
                     route_type: routeType,
@@ -701,7 +701,7 @@
                     params.start_bearing = 0; // 默认北向
                 } else {
                     const endLatLng = endMarker.getLatLng();
-                    params.end_point = [endLatLng.lng, endLatLng.lat]; // [lng, lat] 格式
+                    params.end_point = [endLatLng.lat, endLatLng.lng]; // [lat, lng] 格式
                 }
                 
                 console.log('生成路线参数:', params);
@@ -824,7 +824,7 @@
                 
                 // 总体评分
                 const gradeColor = getGradeColor(score.overall_grade);
-                qualityHtml += `<div style="margin-bottom: 10px;"><strong>总体评分:</strong> <span style="color: ${gradeColor}; font-weight: bold;">${(score.overall_score * 100).toFixed(1)}% (${score.overall_grade})</span></div>`;
+                qualityHtml += `<div style="margin-bottom: 10px;"><strong>总体评分:</strong> <span style="color: ${gradeColor}; font-weight: bold;">${score.overall_score ? (score.overall_score * 100).toFixed(1) : 'N/A'}% (${score.overall_grade || 'N/A'})</span></div>`;
                 
                 // 基础指标
                 if (score.base_scores) {
@@ -917,7 +917,7 @@
                 qualityHtml += `<div style="font-size: 13px;"><strong>闭合状态:</strong> ${validation.is_closed ? '✅ 已闭合' : '❌ 未闭合'}</div>`;
                 qualityHtml += `<div style="font-size: 13px;"><strong>闭合距离:</strong> ${validation.closure_distance.toFixed(1)} 米</div>`;
                 qualityHtml += `<div style="font-size: 13px;"><strong>起点偏差:</strong> ${validation.start_point_deviation.toFixed(1)} 米</div>`;
-                qualityHtml += `<div style="font-size: 13px;"><strong>质量等级:</strong> ${validation.quality_grade}</div>`;
+                qualityHtml += `<div style="font-size: 13px;"><strong>质量等级:</strong> ${validation.closure_grade || 'N/A'}</div>`;
                 qualityHtml += '</div>';
             }
             
@@ -927,8 +927,8 @@
                 qualityHtml += '<div style="margin: 15px 0; padding: 12px; background-color: #fff8f0; border-radius: 6px; border-left: 3px solid #f66a0a;">';
                 qualityHtml += '<h5 style="margin: 0 0 8px 0; color: #f66a0a;">↩️ 原路折返分析</h5>';
                 qualityHtml += `<div style="font-size: 13px;"><strong>折返比例:</strong> ${(analysis.backtrack_ratio * 100).toFixed(1)}%</div>`;
-                qualityHtml += `<div style="font-size: 13px;"><strong>折返段数:</strong> ${analysis.backtrack_segments}</div>`;
-                qualityHtml += `<div style="font-size: 13px;"><strong>严重程度:</strong> ${analysis.severity_level}</div>`;
+                qualityHtml += `<div style="font-size: 13px;"><strong>折返段数:</strong> ${analysis.backtrack_segments ? analysis.backtrack_segments.length : 0}</div>`;
+                qualityHtml += `<div style="font-size: 13px;"><strong>严重程度:</strong> ${analysis.severity_score ? analysis.severity_score.toFixed(2) : 'N/A'}</div>`;
                 if (analysis.total_backtrack_distance > 0) {
                     qualityHtml += `<div style="font-size: 13px;"><strong>折返距离:</strong> ${(analysis.total_backtrack_distance/1000).toFixed(2)} km</div>`;
                 }
@@ -953,8 +953,8 @@
                 qualityHtml += '<div style="margin: 15px 0; padding: 12px; background-color: #f0fdf4; border-radius: 6px; border-left: 3px solid #16a34a;">';
                 qualityHtml += '<h5 style="margin: 0 0 8px 0; color: #16a34a;">✅ 多层次验证</h5>';
                 qualityHtml += `<div style="font-size: 13px;"><strong>总体通过:</strong> ${validation.overall_passed ? '✅ 通过' : '❌ 未通过'}</div>`;
-                qualityHtml += `<div style="font-size: 13px;"><strong>验证等级:</strong> ${validation.validation_grade}</div>`;
-                qualityHtml += `<div style="font-size: 13px;"><strong>通过项目:</strong> ${validation.passed_validations}/${validation.total_validations}</div>`;
+                qualityHtml += `<div style="font-size: 13px;"><strong>验证等级:</strong> ${validation.quality_grade || 'N/A'}</div>`;
+                qualityHtml += `<div style="font-size: 13px;"><strong>通过项目:</strong> ${validation.passed_tests || 0}/${validation.total_tests || 0}</div>`;
                 
                 if (validation.failed_validations && validation.failed_validations.length > 0) {
                     qualityHtml += '<div style="margin-top: 8px; font-size: 13px;"><strong>未通过项目:</strong></div>';
@@ -1038,7 +1038,7 @@
                 console.log('参数:', { lat, lng, distance, curveLevel, enableProgressive });
                 
                 const params = {
-                    start_point: [lng, lat], // [lng, lat] 格式
+                    start_point: [lat, lng], // 修正：系统内部使用 [lat, lng] 格式
                     target_distance: distance * 1000, // 转换为米
                     curve_level: curveLevel,
                     route_type: "roundtrip",
@@ -1065,7 +1065,7 @@
                         output += `闭合验证结果:\n`;
                         output += `- 闭合状态: ${validation.is_closed ? '✅ 已闭合' : '❌ 未闭合'}\n`;
                         output += `- 闭合距离: ${validation.closure_distance.toFixed(1)} 米\n`;
-                        output += `- 质量等级: ${validation.quality_grade}\n\n`;
+                        output += `- 质量等级: ${validation.closure_grade || 'N/A'}\n\n`;
                     }
                     
                     // 渐进式优化结果
@@ -1092,7 +1092,7 @@
                     if (info.quality_score) {
                         const score = info.quality_score;
                         output += `质量评分:\n`;
-                        output += `- 总体评分: ${(score.overall_score * 100).toFixed(1)}% (${score.overall_grade})\n`;
+                        output += `- 总体评分: ${score.overall_score ? (score.overall_score * 100).toFixed(1) : 'N/A'}% (${score.overall_grade || 'N/A'})\n`;
                         if (score.base_scores) {
                             output += `- 环形闭合: ${(score.base_scores.closure_quality * 100).toFixed(1)}%\n`;
                             output += `- 折返避免: ${(score.base_scores.backtrack_avoidance * 100).toFixed(1)}%\n`;
@@ -1131,7 +1131,7 @@
                 console.log('开始闭合优化对比测试...');
                 
                 const baseParams = {
-                    start_point: [lng, lat],
+                    start_point: [lat, lng], // 修正：系统内部使用 [lat, lng] 格式
                     target_distance: distance * 1000,
                     curve_level: curveLevel,
                     route_type: "roundtrip",
