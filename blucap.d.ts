@@ -20,6 +20,99 @@ export interface Point {
 
 export type CurveLevel = 'low' | 'medium' | 'high';
 
+export type HighwayAvoidanceLevel = 'none' | 'moderate' | 'strict';
+
+export type AlternativeRoutePreference = 'fastest' | 'balanced' | 'scenic';
+
+export interface HighwayAvoidanceSettings {
+  /** Enable highway avoidance */
+  avoid_highways?: boolean;
+  /** Strict highway avoidance mode */
+  avoid_highways_strict?: boolean;
+  /** Highway avoidance level */
+  highway_avoidance_level?: HighwayAvoidanceLevel;
+  /** Alternative route preference */
+  alternative_route_preference?: AlternativeRoutePreference;
+  /** Prefer scenic routes */
+  prefer_scenic?: boolean;
+}
+
+export interface AvoidanceDecision {
+  /** Decision timestamp */
+  timestamp: string;
+  /** Curve level used */
+  curveLevel: CurveLevel;
+  /** Applied settings */
+  settings: HighwayAvoidanceSettings;
+  /** List of decisions made */
+  decisions: AvoidanceDecisionItem[];
+  /** Alternative routes calculated */
+  alternativeRoutes: AlternativeRoute[];
+}
+
+export interface AvoidanceDecisionItem {
+  /** Decision type */
+  type: 'highway_avoidance' | 'route_preference' | 'alternative_calculation';
+  /** Action taken */
+  action: string;
+  /** Reason for the decision */
+  reason: string;
+  /** Method used (optional) */
+  method?: string;
+  /** Count (optional) */
+  count?: number;
+}
+
+export interface AlternativeRoute {
+  /** Alternative route ID */
+  id: string;
+  /** Strategy name */
+  strategy: string;
+  /** Strategy description */
+  description: string;
+  /** Route parameters */
+  parameters: any;
+  /** Estimated impact */
+  estimatedImpact: {
+    timeIncrease: string;
+    distanceIncrease: string;
+    scenicValue: string;
+  };
+}
+
+export interface AvoidanceStatistics {
+  /** Total number of decisions */
+  totalDecisions: number;
+  /** Number of times avoidance was enabled */
+  avoidanceEnabled: number;
+  /** Number of times avoidance was disabled */
+  avoidanceDisabled: number;
+  /** Number of strict avoidance decisions */
+  strictAvoidance: number;
+  /** Number of moderate avoidance decisions */
+  moderateAvoidance: number;
+  /** Number of no avoidance decisions */
+  noAvoidance: number;
+  /** Average decisions per route */
+  averageDecisionsPerRoute: number;
+}
+
+export interface AvoidanceHistoryOptions {
+  /** Limit number of returned records */
+  limit?: number;
+  /** Filter by curve level */
+  curveLevel?: CurveLevel;
+  /** Filter records since this date */
+  since?: Date;
+}
+
+export interface AvoidanceClearOptions {
+  /** Keep recent records */
+  keepRecent?: boolean;
+  /** Number of records to keep */
+  keepCount?: number;
+}
+
 export interface RoundTripOptions {
   /** Starting point [lat, lng] */
   startPoint: Point;
@@ -29,6 +122,8 @@ export interface RoundTripOptions {
   curveLevel?: CurveLevel;
   /** Starting bearing in degrees (0-360) */
   startBearing?: number;
+  /** Highway avoidance settings */
+  highwayAvoidance?: HighwayAvoidanceSettings;
 }
 
 export interface PointToPointOptions {
@@ -40,6 +135,8 @@ export interface PointToPointOptions {
   curveLevel?: CurveLevel;
   /** Target distance in kilometers (optional, for detours) */
   targetDistance?: number;
+  /** Highway avoidance settings */
+  highwayAvoidance?: HighwayAvoidanceSettings;
 }
 
 export interface RouteInstruction {
@@ -113,6 +210,31 @@ export default class Blucap {
    * @returns Promise resolving to route data
    */
   generatePointToPoint(options: PointToPointOptions): Promise<RouteResponse>;
+
+  /**
+   * Get highway avoidance decision history
+   * @param options Filter options
+   * @returns Array of avoidance decisions
+   */
+  getAvoidanceHistory(options?: AvoidanceHistoryOptions): AvoidanceDecision[];
+
+  /**
+   * Get the last avoidance decision made
+   * @returns Last avoidance decision or null
+   */
+  getLastAvoidanceDecision(): AvoidanceDecision | null;
+
+  /**
+   * Clear avoidance decision history
+   * @param options Clear options
+   */
+  clearAvoidanceHistory(options?: AvoidanceClearOptions): void;
+
+  /**
+   * Get avoidance statistics
+   * @returns Statistics about avoidance decisions
+   */
+  getAvoidanceStatistics(): AvoidanceStatistics;
 }
 
 /**

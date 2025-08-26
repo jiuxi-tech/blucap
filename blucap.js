@@ -1956,29 +1956,41 @@ class Blucap {
         this.curveSettings = {
             "low": {
                 avoid_highways: false,
+                avoid_highways_strict: false,
+                highway_avoidance_level: "none",
                 prefer_scenic: false,
                 detour_factor: 1.1,
                 spiral_intensity: 0.3,
                 randomness_factor: 0.4,
-                min_segment_angle: 45
+                min_segment_angle: 45,
+                alternative_route_preference: "fastest"
             },
             "medium": {
                 avoid_highways: true,
+                avoid_highways_strict: false,
+                highway_avoidance_level: "moderate",
                 prefer_scenic: true,
                 detour_factor: 1.3,
                 spiral_intensity: 0.6,
                 randomness_factor: 0.7,
-                min_segment_angle: 30
+                min_segment_angle: 30,
+                alternative_route_preference: "balanced"
             },
             "high": {
                 avoid_highways: true,
+                avoid_highways_strict: true,
+                highway_avoidance_level: "strict",
                 prefer_scenic: true,
                 detour_factor: 1.6,
                 spiral_intensity: 0.8,
                 randomness_factor: 1.0,
-                min_segment_angle: 20
+                min_segment_angle: 20,
+                alternative_route_preference: "scenic"
             }
         };
+        
+        // 高速公路避让日志记录
+        this.avoidanceLog = [];
     }
 
     /**
@@ -2034,7 +2046,7 @@ class Blucap {
      * @returns {Promise} 路线数据
      */
     async generateRoundTrip(options) {
-        const { startPoint, distance, curveLevel = 'medium', startBearing = 0 } = options;
+        const { startPoint, distance, curveLevel = 'medium', startBearing = 0, highwayAvoidance } = options;
         
         if (!startPoint || !Array.isArray(startPoint) || startPoint.length !== 2) {
             throw new Error('startPoint must be an array of [lat, lng]');
@@ -2045,13 +2057,20 @@ class Blucap {
         }
 
         // 转换为新API格式
-        return this.generateFunRoute({
+        const reqArgs = {
             start_point: startPoint, // 保持 [lat, lng] 格式
             target_distance: distance * 1000, // 转换为米
             curve_level: curveLevel,
             route_type: "roundtrip",
             start_bearing: startBearing
-        });
+        };
+        
+        // 添加高速公路避让设置
+        if (highwayAvoidance) {
+            reqArgs.highway_avoidance = highwayAvoidance;
+        }
+        
+        return this.generateFunRoute(reqArgs);
     }
 
     /**
@@ -2064,7 +2083,7 @@ class Blucap {
      * @returns {Promise} 路线数据
      */
     async generatePointToPoint(options) {
-        const { startPoint, endPoint, curveLevel = 'medium', targetDistance } = options;
+        const { startPoint, endPoint, curveLevel = 'medium', targetDistance, highwayAvoidance } = options;
         
         if (!startPoint || !Array.isArray(startPoint) || startPoint.length !== 2) {
             throw new Error('startPoint must be an array of [lat, lng]');
@@ -2088,7 +2107,7 @@ class Blucap {
             routePoints = [startPoint, ...detourPoints, endPoint];
         }
         
-        return this._requestRoute(routePoints, curveLevel);
+        return this._requestRoute(routePoints, curveLevel, highwayAvoidance);
     }
 
     /**
@@ -3895,7 +3914,7 @@ class Blucap {
     /**
      * 发送路线请求到 GraphHopper API
      */
-    async _requestRoute(points, curveLevel) {
+    async _requestRoute(points, curveLevel, highwayAvoidance) {
         // GraphHopper API 期望的坐标格式是 [lng, lat]，需要转换
         const convertedPoints = points.map(point => {
             // 确保坐标是有效的数字 - point格式是[lat, lng]
@@ -3921,7 +3940,7 @@ class Blucap {
         };
         
         // 应用弯道设置
-        this._applyCurveSettings(routeRequest, curveLevel);
+        this._applyCurveSettings(routeRequest, curveLevel, highwayAvoidance);
         
         return this._doRouteRequest(routeRequest);
     }
@@ -3963,22 +3982,238 @@ class Blucap {
     /**
      * 应用弯道设置到路线请求（兼容免费套餐）
      */
-    _applyCurveSettings(routeRequest, curveLevel) {
+    _applyCurveSettings(routeRequest, curveLevel, highwayAvoidance = null) {
         const settings = this.curveSettings[curveLevel] || this.curveSettings["medium"];
         
-        // 基础避让策略（免费套餐兼容）
-        if (settings.avoid_highways && curveLevel !== "low") {
-            routeRequest.avoid = "motorway";
+        // 如果提供了highwayAvoidance参数，则覆盖默认设置
+        if (highwayAvoidance) {
+            Object.assign(settings, highwayAvoidance);
         }
         
-        // 基础路径权重策略
-        if (settings.prefer_scenic) {
-            routeRequest.weighting = "shortest";
-        } else {
-            routeRequest.weighting = "fastest";
+        // 记录避让决策开始
+        const avoidanceDecision = {
+            timestamp: new Date().toISOString(),
+            curveLevel: curveLevel,
+            settings: { ...settings },
+            highwayAvoidanceOverride: highwayAvoidance,
+            decisions: [],
+            alternativeRoutes: []
+        };
+        
+        // 高级高速公路避让策略
+        this._applyHighwayAvoidanceStrategy(routeRequest, settings, avoidanceDecision);
+        
+        // 替代路线偏好策略
+        this._applyAlternativeRouteStrategy(routeRequest, settings, avoidanceDecision);
+        
+        // 记录避让决策
+        this.avoidanceLog.push(avoidanceDecision);
+        
+        // 限制历史记录大小，防止内存问题
+        if (this.avoidanceLog.length > 1000) {
+            this.avoidanceLog = this.avoidanceLog.slice(-1000);
         }
         
         return routeRequest;
+    }
+    
+    /**
+     * 应用高速公路避让策略（兼容免费套餐）
+     */
+    _applyHighwayAvoidanceStrategy(routeRequest, settings, avoidanceDecision) {
+        if (!settings.avoid_highways) {
+            avoidanceDecision.decisions.push({
+                type: 'highway_avoidance',
+                action: 'allow_highways',
+                reason: 'Highway avoidance disabled for this curve level'
+            });
+            return;
+        }
+        
+        // 免费套餐只支持基本的avoid参数，不支持custom_model
+        switch (settings.highway_avoidance_level) {
+            case "strict":
+                // 严格避让：避开高速公路和主干道
+                routeRequest.avoid = "motorway";
+                avoidanceDecision.decisions.push({
+                    type: 'highway_avoidance',
+                    action: 'strict_avoidance',
+                    reason: 'Complete avoidance of motorways using avoid parameter',
+                    method: 'avoid_parameter'
+                });
+                break;
+                
+            case "moderate":
+                // 适度避让：只避开高速公路
+                routeRequest.avoid = "motorway";
+                avoidanceDecision.decisions.push({
+                    type: 'highway_avoidance',
+                    action: 'moderate_avoidance',
+                    reason: 'Avoid motorways using avoid parameter',
+                    method: 'avoid_parameter'
+                });
+                break;
+                
+            case "none":
+            default:
+                avoidanceDecision.decisions.push({
+                    type: 'highway_avoidance',
+                    action: 'no_avoidance',
+                    reason: 'No highway avoidance applied'
+                });
+                break;
+        }
+    }
+    
+    /**
+     * 应用替代路线策略
+     */
+    _applyAlternativeRouteStrategy(routeRequest, settings, avoidanceDecision) {
+        switch (settings.alternative_route_preference) {
+            case "scenic":
+                routeRequest.weighting = "shortest";
+                avoidanceDecision.decisions.push({
+                    type: 'route_preference',
+                    action: 'scenic_preference',
+                    reason: 'Prioritize scenic routes with shortest path weighting'
+                });
+                break;
+                
+            case "balanced":
+                routeRequest.weighting = "fastest";
+                avoidanceDecision.decisions.push({
+                    type: 'route_preference',
+                    action: 'balanced_preference',
+                    reason: 'Balance between speed using fastest weighting'
+                });
+                break;
+                
+            case "fastest":
+            default:
+                routeRequest.weighting = "fastest";
+                avoidanceDecision.decisions.push({
+                    type: 'route_preference',
+                    action: 'fastest_preference',
+                    reason: 'Prioritize fastest route'
+                });
+                break;
+        }
+        
+        // 如果启用了高速公路避让，计算替代路线
+        if (settings.avoid_highways) {
+            this._calculateAlternativeRoutes(routeRequest, settings, avoidanceDecision);
+        }
+    }
+    
+    /**
+     * 计算替代路线算法
+     */
+    _calculateAlternativeRoutes(routeRequest, settings, avoidanceDecision) {
+        const alternativeStrategies = this._generateAlternativeStrategies(settings);
+        
+        alternativeStrategies.forEach((strategy, index) => {
+            const alternativeRoute = {
+                id: `alt_${index + 1}`,
+                strategy: strategy.name,
+                description: strategy.description,
+                parameters: { ...strategy.parameters },
+                estimatedImpact: strategy.estimatedImpact
+            };
+            
+            // 应用替代路线参数到请求（兼容免费套餐）
+            if (strategy.parameters.weighting) {
+                routeRequest.weighting = strategy.parameters.weighting;
+            }
+            
+            if (strategy.parameters.avoid) {
+                routeRequest.avoid = routeRequest.avoid 
+                    ? `${routeRequest.avoid};${strategy.parameters.avoid}`
+                    : strategy.parameters.avoid;
+            }
+            
+            avoidanceDecision.alternativeRoutes.push(alternativeRoute);
+        });
+        
+        avoidanceDecision.decisions.push({
+            type: 'alternative_calculation',
+            action: 'multiple_alternatives_generated',
+            reason: `Generated ${alternativeStrategies.length} alternative route strategies`,
+            count: alternativeStrategies.length
+        });
+    }
+    
+    /**
+     * 生成替代路线策略
+     */
+    _generateAlternativeStrategies(settings) {
+        const strategies = [];
+        
+        // 策略1: 优先使用国道和省道
+        strategies.push({
+            name: 'primary_secondary_preference',
+            description: '优先使用国道和省道，避开高速公路',
+            parameters: {
+                avoid: 'motorway',
+                weighting: 'fastest'
+            },
+            estimatedImpact: {
+                timeIncrease: '15-25%',
+                distanceIncrease: '10-20%',
+                scenicValue: 'high'
+            }
+        });
+        
+        // 策略2: 城市道路优先
+        if (settings.highway_avoidance_level === 'strict') {
+            strategies.push({
+                name: 'urban_roads_preference',
+                description: '优先使用城市道路和乡村道路',
+                parameters: {
+                    avoid: 'motorway',
+                    weighting: 'shortest'
+                },
+                estimatedImpact: {
+                    timeIncrease: '25-40%',
+                    distanceIncrease: '5-15%',
+                    scenicValue: 'medium'
+                }
+            });
+        }
+        
+        // 策略3: 风景路线优先
+        if (settings.prefer_scenic) {
+            strategies.push({
+                name: 'scenic_route_preference',
+                description: '优先选择风景优美的路线',
+                parameters: {
+                    avoid: 'ferry',
+                    weighting: 'shortest'
+                },
+                estimatedImpact: {
+                    timeIncrease: '20-35%',
+                    distanceIncrease: '15-30%',
+                    scenicValue: 'very_high'
+                }
+            });
+        }
+        
+        // 策略4: 平衡路线（适度避让）
+        if (settings.highway_avoidance_level === 'moderate') {
+            strategies.push({
+                name: 'balanced_avoidance',
+                description: '在时间和避让之间寻求平衡',
+                parameters: {
+                    weighting: 'fastest'
+                },
+                estimatedImpact: {
+                    timeIncrease: '10-20%',
+                    distanceIncrease: '5-15%',
+                    scenicValue: 'medium'
+                }
+            });
+        }
+        
+        return strategies;
     }
 
     /**
@@ -7922,6 +8157,147 @@ class Blucap {
           }
           
           return totalDistance;
+      }
+      
+      /**
+       * 获取高速公路避让决策历史
+       * @param {Object} options - 查询选项
+       * @param {number} options.limit - 返回记录数量限制
+       * @param {string} options.curveLevel - 筛选特定弯道等级
+       * @param {Date} options.since - 筛选指定时间之后的记录
+       * @returns {Array} 避让决策历史记录
+       */
+      getAvoidanceHistory(options = {}) {
+          let history = [...this.avoidanceLog];
+          
+          // 按时间筛选
+          if (options.since) {
+              const sinceTime = new Date(options.since).getTime();
+              history = history.filter(record => 
+                  new Date(record.timestamp).getTime() >= sinceTime
+              );
+          }
+          
+          // 按弯道等级筛选
+          if (options.curveLevel) {
+              history = history.filter(record => 
+                  record.curveLevel === options.curveLevel
+              );
+          }
+          
+          // 按时间倒序排列
+          history.sort((a, b) => 
+              new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
+          );
+          
+          // 限制返回数量
+          if (options.limit && options.limit > 0) {
+              history = history.slice(0, options.limit);
+          }
+          
+          return history;
+      }
+      
+      /**
+       * 获取最近一次避让决策详情
+       * @returns {Object|null} 最近的避让决策记录
+       */
+      getLastAvoidanceDecision() {
+          return this.avoidanceLog.length > 0 
+              ? this.avoidanceLog[this.avoidanceLog.length - 1] 
+              : null;
+      }
+      
+      /**
+       * 清除避让决策历史
+       * @param {Object} options - 清除选项
+       * @param {boolean} options.keepRecent - 是否保留最近的记录
+       * @param {number} options.keepCount - 保留记录数量（当keepRecent为true时）
+       */
+      clearAvoidanceHistory(options = {}) {
+          if (options.keepRecent && options.keepCount > 0) {
+              const keepCount = Math.min(options.keepCount, this.avoidanceLog.length);
+              this.avoidanceLog = this.avoidanceLog.slice(-keepCount);
+          } else {
+              this.avoidanceLog = [];
+          }
+      }
+      
+      /**
+       * 获取避让统计信息
+       * @returns {Object} 避让统计数据
+       */
+      getAvoidanceStatistics() {
+          if (this.avoidanceLog.length === 0) {
+              return {
+                  totalDecisions: 0,
+                  avoidanceEnabled: 0,
+                  avoidanceDisabled: 0,
+                  strictAvoidance: 0,
+                  moderateAvoidance: 0,
+                  noAvoidance: 0,
+                  averageDecisionsPerRoute: 0
+              };
+          }
+          
+          const stats = {
+              totalDecisions: this.avoidanceLog.length,
+              avoidanceEnabled: 0,
+              avoidanceDisabled: 0,
+              strictAvoidance: 0,
+              moderateAvoidance: 0,
+              noAvoidance: 0
+          };
+          
+          this.avoidanceLog.forEach(record => {
+              const highwayDecision = record.decisions.find(d => d.type === 'highway_avoidance');
+              if (highwayDecision) {
+                  switch (highwayDecision.action) {
+                      case 'allow_highways':
+                          stats.avoidanceDisabled++;
+                          break;
+                      case 'strict_avoidance':
+                      case 'basic_avoidance':
+                          stats.strictAvoidance++;
+                          stats.avoidanceEnabled++;
+                          break;
+                      case 'moderate_avoidance':
+                          stats.moderateAvoidance++;
+                          stats.avoidanceEnabled++;
+                          break;
+                      case 'no_avoidance':
+                          stats.noAvoidance++;
+                          break;
+                  }
+              }
+          });
+          
+          // 计算避让率
+          stats.avoidanceRate = stats.totalDecisions > 0 
+              ? stats.avoidanceEnabled / stats.totalDecisions 
+              : 0;
+          
+          // 计算平均决策数
+          stats.averageDecisionsPerRoute = this.avoidanceLog.length > 0 
+              ? parseFloat((this.avoidanceLog.reduce((sum, record) => sum + record.decisions.length, 0) / this.avoidanceLog.length).toFixed(2))
+              : 0;
+          
+          // 弯道等级分布
+          stats.curveDistribution = {};
+          this.avoidanceLog.forEach(record => {
+              const level = record.curveLevel || 'unknown';
+              stats.curveDistribution[level] = (stats.curveDistribution[level] || 0) + 1;
+          });
+          
+          // 替代路线使用情况
+          stats.alternativeRouteUsage = {
+              total: this.avoidanceLog.reduce((sum, record) => sum + (record.alternativeRoutes ? record.alternativeRoutes.length : 0), 0),
+              applied: this.avoidanceLog.reduce((sum, record) => {
+                  return sum + (record.alternativeRoutes ? record.alternativeRoutes.filter(route => route.applied).length : 0);
+              }, 0)
+          };
+          
+          return stats;
       }
   }
 
