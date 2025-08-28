@@ -184,6 +184,13 @@
                 <label for="startBearing">起始方向 (度, 0-360):</label>
                 <input type="number" id="startBearing" value="0" min="0" max="360">
             </div>
+            <div class="form-group">
+                <label style="display: flex; align-items: center; font-size: 14px;">
+                    <input type="checkbox" id="useMultipleCandidates" checked style="margin-right: 8px;">
+                    启用多候选路线生成 (新算法)
+                </label>
+                <small style="color: #666; margin-left: 24px;">生成多条候选路线并选择最优路线，减少回头路和局部绕圈</small>
+            </div>
             <button onclick="testRoundTrip()">生成环形路线</button>
             <button onclick="testRoundTripNew()">测试新API (generateFunRoute)</button>
             <div id="roundTripResult" class="result" style="display: none;"></div>
@@ -290,6 +297,31 @@
                     </select>
                 </div>
                 
+                <div class="form-group" style="margin-bottom: 0; min-width: 140px;">
+                    <label for="mapHighwayAvoidance" style="margin-bottom: 5px;">高速避让:</label>
+                    <select id="mapHighwayAvoidance" style="width: 100%;">
+                        <option value="none">无避让</option>
+                        <option value="moderate" selected>适度避让</option>
+                        <option value="strict">严格避让</option>
+                    </select>
+                </div>
+                
+                <div class="form-group" style="margin-bottom: 0; min-width: 140px;">
+                    <label style="margin-bottom: 5px; display: block;">付费模式:</label>
+                    <label style="display: flex; align-items: center; font-size: 14px;">
+                        <input type="checkbox" id="usePaidFeatures" style="margin-right: 8px;">
+                        启用custom_model
+                    </label>
+                </div>
+                
+                <div class="form-group" style="margin-bottom: 0; min-width: 140px;">
+                    <label style="margin-bottom: 5px; display: block;">新算法:</label>
+                    <label style="display: flex; align-items: center; font-size: 14px;">
+                        <input type="checkbox" id="mapUseMultipleCandidates" checked style="margin-right: 8px;">
+                        多候选路线生成
+                    </label>
+                </div>
+                
                 <div style="display: flex; align-items: end; gap: 10px;">
                     <button onclick="generateMapRoute()">生成路线</button>
                     <button onclick="clearMap()" style="background-color: #dc3545;">清除地图</button>
@@ -310,7 +342,7 @@
     <script>
         // 动态加载库文件以避免缓存
         const script = document.createElement('script');
-        script.src = '/blucap.js';
+        script.src = '../blucap.js';
         document.head.appendChild(script);
     </script>
     
@@ -403,6 +435,9 @@
             }
             
             try {
+                // 保存API key到localStorage
+                localStorage.setItem('graphhopper_api_key', apiKey);
+                
                 funRouteGenerator = new Blucap({
                     apiKey: apiKey,
                     profile: 'car' // 设置为汽车配置（API 支持的类型）
@@ -452,6 +487,7 @@
             const distance = parseInt(document.getElementById('roundTripDistance').value);
             const curveLevel = document.getElementById('roundTripCurve').value;
             const startBearing = parseInt(document.getElementById('startBearing').value);
+            const useMultipleCandidates = document.getElementById('useMultipleCandidates').checked;
             
             if (isNaN(lat) || isNaN(lng) || isNaN(distance)) {
                 showResult('roundTripResult', '请输入有效的坐标和距离', 'error');
@@ -527,7 +563,9 @@
                     target_distance: distance * 1000, // 转换为米
                     curve_level: curveLevel,
                     route_type: "roundtrip",
-                    start_bearing: startBearing
+                    start_bearing: startBearing,
+                    use_multiple_candidates: useMultipleCandidates,
+                    candidate_count: 10 // 生成10条候选路线
                 });
                 
                 console.log('新API环形路线生成成功:', result);
@@ -571,6 +609,25 @@
                         output += `\n智能重试信息:\n`;
                         output += `- 重试次数: ${retry.retry_count}\n`;
                         output += `- 质量提升: ${(retry.improvement * 100).toFixed(1)}%\n`;
+                    }
+                    
+                    // 添加候选路线信息显示
+                    if (result.candidate_info) {
+                        const candidateInfo = result.candidate_info;
+                        output += `\n🎯 多候选路线生成信息:\n`;
+                        output += `- 生成候选数: ${candidateInfo.total_candidates}\n`;
+                        output += `- 总尝试次数: ${candidateInfo.attempts}\n`;
+                        output += `- 选中路线ID: ${candidateInfo.selected_candidate_id}\n`;
+                        
+                        if (candidateInfo.all_scores && candidateInfo.all_scores.length > 0) {
+                            output += `\n候选路线评分排名:\n`;
+                            const sortedScores = candidateInfo.all_scores.sort((a, b) => b.score - a.score);
+                            sortedScores.slice(0, 5).forEach((candidate, index) => {
+                                const isSelected = candidate.id === candidateInfo.selected_candidate_id;
+                                const marker = isSelected ? '🏆' : `${index + 1}.`;
+                                output += `${marker} 路线${candidate.id}: ${(candidate.score * 100).toFixed(1)}%${isSelected ? ' (已选择)' : ''}\n`;
+                            });
+                        }
                     }
                     
                     output += '\n';
@@ -680,6 +737,22 @@
             
             const distance = parseInt(document.getElementById('mapDistance').value);
             const curveLevel = document.getElementById('mapCurveLevel').value;
+            const highwayAvoidance = document.getElementById('mapHighwayAvoidance').value;
+            const usePaidFeatures = document.getElementById('usePaidFeatures').checked;
+            const useMultipleCandidates = document.getElementById('mapUseMultipleCandidates').checked;
+            
+            // 如果启用付费模式，需要重新初始化Blucap实例
+            if (usePaidFeatures && (!funRouteGenerator.config || !funRouteGenerator.config.usePaidFeatures)) {
+                const apiKey = localStorage.getItem('graphhopper_api_key');
+                if (!apiKey) {
+                    alert('请先设置 API Key');
+                    return;
+                }
+                funRouteGenerator = new Blucap({
+                    apiKey: apiKey,
+                    usePaidFeatures: true
+                });
+            }
             
             // 显示加载状态
             document.getElementById('routeInfo').style.display = 'block';
@@ -697,8 +770,22 @@
                     points_encoded: false
                 };
                 
+                // 添加高速公路避让参数
+                if (highwayAvoidance !== 'none') {
+                    params.highway_avoidance = {
+                        avoid_highways: true,
+                        avoid_highways_strict: highwayAvoidance === 'strict',
+                        highway_avoidance_level: highwayAvoidance
+                    };
+                }
+                
                 if (routeType === 'roundtrip') {
                     params.start_bearing = 0; // 默认北向
+                    // 只有环形路线才支持多候选路线生成
+                    if (useMultipleCandidates) {
+                        params.use_multiple_candidates = true;
+                        params.candidate_count = 10;
+                    }
                 } else {
                     const endLatLng = endMarker.getLatLng();
                     params.end_point = [endLatLng.lat, endLatLng.lng]; // [lat, lng] 格式
@@ -781,10 +868,13 @@
                 info += '</div>';
                 
                 // 显示路径质量指标
-                info += displayQualityMetrics(result.route_info);
-            }
+            info += displayQualityMetrics(result.route_info);
             
-            if (result.paths && result.paths.length > 0) {
+            // 显示多候选路线信息
+            info += displayCandidateRoutesInfo(result.route_info);
+        }
+        
+        if (result.paths && result.paths.length > 0) {
                 const path = result.paths[0];
                 info += '<div style="margin-bottom: 15px;">';
                 info += `<strong>实际路径距离:</strong> ${(path.distance/1000).toFixed(2)} km<br>`;
@@ -1000,6 +1090,36 @@
             }
             
             return qualityHtml;
+        }
+        
+        function displayCandidateRoutesInfo(routeInfo) {
+            let candidateHtml = '';
+            
+            // 多候选路线生成信息
+            if (routeInfo && routeInfo.candidate_info) {
+                const candidateInfo = routeInfo.candidate_info;
+                candidateHtml += '<div style="margin: 20px 0; padding: 15px; background-color: #f0f8ff; border-radius: 8px; border-left: 4px solid #4169e1;">';
+                candidateHtml += '<h4 style="margin: 0 0 10px 0; color: #4169e1;">🎯 多候选路线生成</h4>';
+                
+                candidateHtml += `<div style="margin-bottom: 10px;"><strong>生成候选数:</strong> ${candidateInfo.total_candidates || 0}</div>`;
+                candidateHtml += `<div style="margin-bottom: 10px;"><strong>总尝试次数:</strong> ${candidateInfo.attempts || 0}</div>`;
+                candidateHtml += `<div style="margin-bottom: 10px;"><strong>选中路线ID:</strong> ${candidateInfo.selected_candidate_id || 'N/A'}</div>`;
+                
+                // 候选路线评分排名
+                if (candidateInfo.all_scores && candidateInfo.all_scores.length > 0) {
+                    candidateHtml += '<div style="margin: 10px 0;"><strong>候选路线评分排名:</strong></div>';
+                    candidateHtml += '<div style="margin-left: 15px; font-size: 13px;">';
+                    candidateInfo.all_scores.forEach((candidate, index) => {
+                        const rankIcon = index === 0 ? '🥇' : index === 1 ? '🥈' : index === 2 ? '🥉' : `${index + 1}.`;
+                        candidateHtml += `${rankIcon} 路线${candidate.id}: ${(candidate.score * 100).toFixed(1)}%<br>`;
+                    });
+                    candidateHtml += '</div>';
+                }
+                
+                candidateHtml += '</div>';
+            }
+            
+            return candidateHtml;
         }
         
         function getGradeColor(grade) {

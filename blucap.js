@@ -11,8 +11,14 @@ const httpClient = {
         });
 
         if (!response.ok) {
-             throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-         }
+            const error = new Error(`HTTP ${response.status}: ${response.statusText}`);
+            error.response = {
+                status: response.status,
+                statusText: response.statusText,
+                data: await response.text()
+            };
+            throw error;
+        }
 
         return {
             data: await response.json()
@@ -1941,12 +1947,17 @@ class Blucap {
             instructions: options.instructions !== false,
             points_encoded: options.points_encoded !== false,
             elevation: options.elevation || false,
+            // 付费模式配置
+            usePaidFeatures: options.usePaidFeatures || false,
             // 趣味路线特有参数
             distance_range: [1000, 1000000], // 1km - 1000km (单位：米)
             curve_level: "medium", // 弯道等级: "low", "medium", "high"
             route_type: "roundtrip", // "roundtrip" 或 "point_to_point"
             ...options
         };
+        
+        // 保存API key的引用以便在其他方法中使用
+        this.apiKey = this.config.apiKey;
         
         if (!this.config.apiKey) {
             throw new Error('GraphHopper API key is required');
@@ -2030,7 +2041,17 @@ class Blucap {
         }
         
         if (params.route_type === "roundtrip") {
-            return this._generateRoundTrip(params);
+            // 检查是否启用多候选路线生成
+            const useMultipleCandidates = params.use_multiple_candidates !== false; // 默认启用
+            const candidateCount = params.candidate_count || 10;
+            
+            if (useMultipleCandidates) {
+                console.log('使用多候选路线生成模式');
+                return this._generateMultipleCandidateRoundTrips(params, candidateCount);
+            } else {
+                console.log('使用传统单路线生成模式');
+                return this._generateRoundTrip(params);
+            }
         } else {
             return this._generatePointToPoint(params);
         }
@@ -2111,6 +2132,295 @@ class Blucap {
     }
 
     /**
+     * 生成多条候选环形路线并选择最优路线
+     * @param {Object} reqArgs - 请求参数
+     * @param {number} candidateCount - 候选路线数量，默认10条
+     * @returns {Object} 最优路线结果
+     */
+    async _generateMultipleCandidateRoundTrips(reqArgs, candidateCount = 10) {
+        const startPoint = reqArgs.start_point;
+        const targetDistance = reqArgs.target_distance;
+        const curveLevel = reqArgs.curve_level || "medium";
+        const startBearing = reqArgs.start_bearing || 0;
+        
+        console.log(`开始生成 ${candidateCount} 条候选环形路线...`);
+        
+        const candidates = [];
+        const maxRetries = candidateCount * 2; // 允许更多尝试以获得足够的候选路线
+        let attempts = 0;
+        
+        // 生成多条候选路线
+        while (candidates.length < candidateCount && attempts < maxRetries) {
+            attempts++;
+            
+            try {
+                // 为每条候选路线使用不同的参数变化
+                const variation = this._generateRouteVariation(attempts, candidateCount);
+                const modifiedReqArgs = {
+                    ...reqArgs,
+                    start_bearing: (startBearing + variation.bearingOffset) % 360,
+                    curve_level: variation.curveLevel || curveLevel,
+                    randomness_seed: variation.seed
+                };
+                
+                console.log(`尝试生成第 ${attempts} 条候选路线 (变化: bearing=${variation.bearingOffset}, curve=${variation.curveLevel})`);
+                
+                // 生成单条路线
+                const candidate = await this._generateSingleRoundTripCandidate(modifiedReqArgs);
+                
+                if (candidate && candidate.paths && candidate.paths.length > 0) {
+                    // 计算路线质量评分
+                    const qualityMetrics = this._calculateRouteQualityMetrics(candidate, reqArgs);
+                    
+                    candidate.quality_metrics = qualityMetrics;
+                    candidate.candidate_id = attempts;
+                    
+                    candidates.push(candidate);
+                    console.log(`成功生成候选路线 ${attempts}, 质量评分: ${qualityMetrics.overall_score.toFixed(3)}`);
+                }
+            } catch (error) {
+                console.warn(`候选路线 ${attempts} 生成失败:`, error.message);
+            }
+        }
+        
+        if (candidates.length === 0) {
+            throw new Error('无法生成任何有效的候选路线');
+        }
+        
+        console.log(`成功生成 ${candidates.length} 条候选路线，开始选择最优路线...`);
+        
+        // 选择最优路线
+        const bestRoute = this._selectBestRoute(candidates);
+        
+        // 添加候选路线信息到结果中
+        bestRoute.candidate_info = {
+            total_candidates: candidates.length,
+            attempts: attempts,
+            selected_candidate_id: bestRoute.candidate_id,
+            all_scores: candidates.map(c => ({
+                id: c.candidate_id,
+                score: c.quality_metrics.overall_score,
+                metrics: c.quality_metrics
+            }))
+        };
+        
+        console.log(`选择了候选路线 ${bestRoute.candidate_id}, 最终评分: ${bestRoute.quality_metrics.overall_score.toFixed(3)}`);
+        
+        return bestRoute;
+    }
+    
+    /**
+     * 生成路线变化参数
+     * @param {number} attempt - 当前尝试次数
+     * @param {number} totalCandidates - 总候选数量
+     * @returns {Object} 变化参数
+     */
+    _generateRouteVariation(attempt, totalCandidates) {
+        const variation = {
+            bearingOffset: (attempt * 360 / totalCandidates) + (Math.random() - 0.5) * 60, // 方向偏移
+            seed: attempt * 1000 + Math.floor(Math.random() * 1000), // 随机种子
+            curveLevel: null // 默认使用原始弯道等级
+        };
+        
+        // 每隔几条路线尝试不同的弯道等级
+        if (attempt % 3 === 0) {
+            const curveLevels = ['low', 'medium', 'high'];
+            variation.curveLevel = curveLevels[attempt % 3];
+        }
+        
+        return variation;
+    }
+    
+    /**
+     * 生成单条候选环形路线
+     * @param {Object} reqArgs - 请求参数
+     * @returns {Object} 路线结果
+     */
+    async _generateSingleRoundTripCandidate(reqArgs) {
+        // 使用原有的_generateRoundTrip逻辑，但添加随机性
+        return await this._generateRoundTrip(reqArgs);
+    }
+    
+    /**
+     * 计算路线质量评分指标
+     * @param {Object} route - 路线结果
+     * @param {Object} originalReqArgs - 原始请求参数
+     * @returns {Object} 质量评分指标
+     */
+    _calculateRouteQualityMetrics(route, originalReqArgs) {
+        const coordinates = route.paths[0].points.coordinates;
+        const targetDistance = originalReqArgs.target_distance * 1000; // 转换为米
+        const actualDistance = route.paths[0].distance;
+        
+        // 1. 重复边比例
+        const duplicateEdgeRatio = this._calculateDuplicateEdgeRatio(coordinates);
+        
+        // 2. 平均转角平滑度
+        const turnSmoothness = this._calculateTurnSmoothness(coordinates);
+        
+        // 3. 长度偏差
+        const lengthDeviation = Math.abs(actualDistance - targetDistance) / targetDistance;
+        
+        // 4. 环形闭合度
+        const circularClosure = this._calculateCircularClosureScore(coordinates);
+        
+        // 5. 路径多样性
+        const pathDiversity = this._calculatePathDiversity(coordinates);
+        
+        // 综合评分计算
+        const weights = {
+            duplicateEdge: 0.25,    // 重复边权重
+            turnSmoothness: 0.20,   // 转角平滑度权重
+            lengthDeviation: 0.20,  // 长度偏差权重
+            circularClosure: 0.20,  // 闭合度权重
+            pathDiversity: 0.15     // 多样性权重
+        };
+        
+        const overallScore = 
+            (1 - duplicateEdgeRatio) * weights.duplicateEdge +
+            turnSmoothness * weights.turnSmoothness +
+            (1 - Math.min(lengthDeviation, 1)) * weights.lengthDeviation +
+            circularClosure * weights.circularClosure +
+            pathDiversity * weights.pathDiversity;
+        
+        return {
+            duplicate_edge_ratio: duplicateEdgeRatio,
+            turn_smoothness: turnSmoothness,
+            length_deviation: lengthDeviation,
+            circular_closure: circularClosure,
+            path_diversity: pathDiversity,
+            overall_score: Math.max(0, Math.min(1, overallScore)),
+            weights: weights
+        };
+    }
+    
+    /**
+     * 计算重复边比例
+     * @param {Array} coordinates - 路径坐标
+     * @returns {number} 重复边比例 (0-1)
+     */
+    _calculateDuplicateEdgeRatio(coordinates) {
+        if (!coordinates || coordinates.length < 3) return 1;
+        
+        const edges = new Set();
+        let duplicateCount = 0;
+        
+        for (let i = 0; i < coordinates.length - 1; i++) {
+            const p1 = coordinates[i];
+            const p2 = coordinates[i + 1];
+            
+            // 创建边的标识符（考虑双向）
+            const edge1 = `${p1[0].toFixed(6)},${p1[1].toFixed(6)}-${p2[0].toFixed(6)},${p2[1].toFixed(6)}`;
+            const edge2 = `${p2[0].toFixed(6)},${p2[1].toFixed(6)}-${p1[0].toFixed(6)},${p1[1].toFixed(6)}`;
+            
+            if (edges.has(edge1) || edges.has(edge2)) {
+                duplicateCount++;
+            } else {
+                edges.add(edge1);
+            }
+        }
+        
+        return duplicateCount / (coordinates.length - 1);
+    }
+    
+    /**
+     * 计算平均转角平滑度
+     * @param {Array} coordinates - 路径坐标
+     * @returns {number} 转角平滑度 (0-1)
+     */
+    _calculateTurnSmoothness(coordinates) {
+        if (!coordinates || coordinates.length < 3) return 0;
+        
+        let totalSmoothness = 0;
+        let validTurns = 0;
+        
+        for (let i = 1; i < coordinates.length - 1; i++) {
+            const p1 = coordinates[i - 1];
+            const p2 = coordinates[i];
+            const p3 = coordinates[i + 1];
+            
+            // 计算转角
+            const bearing1 = utils._calculateBearing(p2, p1);
+            const bearing2 = utils._calculateBearing(p2, p3);
+            
+            let turnAngle = Math.abs(bearing2 - bearing1);
+            if (turnAngle > 180) turnAngle = 360 - turnAngle;
+            
+            // 平滑度：较小的转角更平滑
+            const smoothness = 1 - (turnAngle / 180);
+            totalSmoothness += smoothness;
+            validTurns++;
+        }
+        
+        return validTurns > 0 ? totalSmoothness / validTurns : 0;
+    }
+    
+    /**
+     * 计算环形闭合评分
+     * @param {Array} coordinates - 路径坐标
+     * @returns {number} 闭合评分 (0-1)
+     */
+    _calculateCircularClosureScore(coordinates) {
+        if (!coordinates || coordinates.length < 3) return 0;
+        
+        const startPoint = coordinates[0];
+        const endPoint = coordinates[coordinates.length - 1];
+        
+        // 计算起终点距离
+        const closureDistance = utils._calculateHighPrecisionDistance(startPoint, endPoint);
+        
+        // 计算路径总长度的近似值
+        let totalLength = 0;
+        for (let i = 1; i < coordinates.length; i++) {
+            totalLength += utils._calculateHighPrecisionDistance(coordinates[i - 1], coordinates[i]);
+        }
+        
+        // 闭合度评分：闭合距离相对于总长度越小越好
+        const closureRatio = closureDistance / totalLength;
+        return Math.max(0, 1 - closureRatio * 10); // 乘以10使评分更敏感
+    }
+    
+    /**
+     * 计算路径多样性
+     * @param {Array} coordinates - 路径坐标
+     * @returns {number} 多样性评分 (0-1)
+     */
+    _calculatePathDiversity(coordinates) {
+        if (!coordinates || coordinates.length < 4) return 0;
+        
+        // 计算方向变化的多样性
+        const bearings = [];
+        for (let i = 1; i < coordinates.length; i++) {
+            const bearing = utils._calculateBearing(coordinates[i - 1], coordinates[i]);
+            bearings.push(bearing);
+        }
+        
+        // 计算方向分布的标准差
+        const avgBearing = bearings.reduce((sum, b) => sum + b, 0) / bearings.length;
+        const variance = bearings.reduce((sum, b) => sum + Math.pow(b - avgBearing, 2), 0) / bearings.length;
+        const stdDev = Math.sqrt(variance);
+        
+        // 标准差越大，多样性越高
+        return Math.min(1, stdDev / 90); // 归一化到0-1
+    }
+    
+    /**
+     * 选择最优路线
+     * @param {Array} candidates - 候选路线数组
+     * @returns {Object} 最优路线
+     */
+    _selectBestRoute(candidates) {
+        if (!candidates || candidates.length === 0) {
+            throw new Error('没有可选择的候选路线');
+        }
+        
+        // 按综合评分排序
+        candidates.sort((a, b) => b.quality_metrics.overall_score - a.quality_metrics.overall_score);
+        
+        return candidates[0];
+    }
+
+    /**
      * 生成环形路线
      */
     async _generateRoundTrip(reqArgs) {
@@ -2125,7 +2435,8 @@ class Blucap {
             startPoint, 
             targetDistance, 
             curveLevel,
-            startBearing
+            startBearing,
+            reqArgs.randomness_seed
         );
         
         // 验证中间点生成是否成功
@@ -2191,7 +2502,8 @@ class Blucap {
                     startPoint, 
                     targetDistance, 
                     curveLevel,
-                    startBearing
+                    startBearing,
+                    reqArgs.randomness_seed
                 );
                 
                 // 构建优化的环形路线点数组
@@ -3076,10 +3388,17 @@ class Blucap {
     /**
      * 为环形路线生成中间点（改进的螺旋式算法）
      */
-    _generateIntermediatePoints(startPoint, targetDistance, curveLevel, startBearing) {
+    _generateIntermediatePoints(startPoint, targetDistance, curveLevel, startBearing, randomnessSeed) {
         const points = [];
         const numPoints = this._calculateOptimalPointCount(targetDistance, curveLevel);
         const baseRadius = this._calculateBaseRadius(targetDistance, curveLevel);
+        
+        // 初始化随机数生成器
+        let randomSeed = randomnessSeed || Math.floor(Math.random() * 1000000);
+        const seededRandom = () => {
+            randomSeed = (randomSeed * 9301 + 49297) % 233280;
+            return randomSeed / 233280;
+        };
         
         // 改进的角度分布策略 - 确保均匀分布且避免重复路径
         const startAngle = startBearing || 0;
@@ -3098,7 +3417,7 @@ class Blucap {
         for (let i = 0; i < numPoints; i++) {
             // 计算均匀分布的角度，添加适当偏移避免过于规则
             const baseAngle = startAngle + (i + 1) * angleStep;
-            const angleVariation = (Math.random() - 0.5) * factor.angleOffset;
+            const angleVariation = (seededRandom() - 0.5) * factor.angleOffset;
             let currentAngle = (baseAngle + angleVariation) % 360;
             
             // 防回头路逻辑：确保角度变化足够大，避免折返
@@ -3107,13 +3426,13 @@ class Blucap {
             
             if (normalizedAngleDiff < factor.minAngleStep) {
                 // 如果角度变化太小，强制增加角度差
-                const direction = Math.random() > 0.5 ? 1 : -1;
+                const direction = seededRandom() > 0.5 ? 1 : -1;
                 currentAngle = (lastAngle + direction * factor.minAngleStep) % 360;
                 if (currentAngle < 0) currentAngle += 360;
             }
             
             // 计算半径，添加变化以创建更自然的形状
-            const radiusVariation = 1 + (Math.random() - 0.5) * factor.radiusVariation;
+            const radiusVariation = 1 + (seededRandom() - 0.5) * factor.radiusVariation;
             const currentRadius = baseRadius * radiusVariation;
             
             // 确保半径不会太小或太大
@@ -3915,7 +4234,7 @@ class Blucap {
      * 发送路线请求到 GraphHopper API
      */
     async _requestRoute(points, curveLevel, highwayAvoidance) {
-        // GraphHopper API 期望的坐标格式是 [lng, lat]，需要转换
+        // GraphHopper API 期望的坐标格式是 [lng, lat]
         const convertedPoints = points.map(point => {
             // 确保坐标是有效的数字 - point格式是[lat, lng]
             const lat = typeof point[0] === 'number' ? point[0] : parseFloat(point[0]);
@@ -4030,38 +4349,59 @@ class Blucap {
             return;
         }
         
-        // 免费套餐只支持基本的avoid参数，不支持custom_model
-        switch (settings.highway_avoidance_level) {
-            case "strict":
-                // 严格避让：避开高速公路和主干道
-                routeRequest.avoid = "motorway";
-                avoidanceDecision.decisions.push({
-                    type: 'highway_avoidance',
-                    action: 'strict_avoidance',
-                    reason: 'Complete avoidance of motorways using avoid parameter',
-                    method: 'avoid_parameter'
-                });
-                break;
-                
-            case "moderate":
-                // 适度避让：只避开高速公路
-                routeRequest.avoid = "motorway";
-                avoidanceDecision.decisions.push({
-                    type: 'highway_avoidance',
-                    action: 'moderate_avoidance',
-                    reason: 'Avoid motorways using avoid parameter',
-                    method: 'avoid_parameter'
-                });
-                break;
-                
-            case "none":
-            default:
-                avoidanceDecision.decisions.push({
-                    type: 'highway_avoidance',
-                    action: 'no_avoidance',
-                    reason: 'No highway avoidance applied'
-                });
-                break;
+        // 检查是否为付费模式（支持custom_model）
+        const isPaidPlan = this.config.usePaidFeatures;
+        
+        if (isPaidPlan && settings.highway_avoidance_level === "strict") {
+            // 付费套餐使用custom_model实现完全避让
+            routeRequest.custom_model = {
+                "priority": [
+                    {
+                        "if": "road_class == MOTORWAY || road_class == TRUNK || road_class == PRIMARY",
+                        "multiply_by": "0"
+                    }
+                ]
+            };
+            avoidanceDecision.decisions.push({
+                type: 'highway_avoidance',
+                action: 'strict_avoidance_custom',
+                reason: 'Complete avoidance of motorways, trunk and primary roads using custom_model',
+                method: 'custom_model'
+            });
+        } else {
+            // 免费套餐或其他模式使用avoid参数
+            switch (settings.highway_avoidance_level) {
+                case "strict":
+                    // 严格避让：避开高速公路、主干道和一级公路
+                    routeRequest.avoid = "motorway,trunk,primary";
+                    avoidanceDecision.decisions.push({
+                        type: 'highway_avoidance',
+                        action: 'strict_avoidance',
+                        reason: 'Strict avoidance of motorways, trunk and primary roads using avoid parameter',
+                        method: 'avoid_parameter'
+                    });
+                    break;
+                    
+                case "moderate":
+                    // 适度避让：避开高速公路和主干道
+                    routeRequest.avoid = "motorway,trunk";
+                    avoidanceDecision.decisions.push({
+                        type: 'highway_avoidance',
+                        action: 'moderate_avoidance',
+                        reason: 'Moderate avoidance of motorways and trunk roads using avoid parameter',
+                        method: 'avoid_parameter'
+                    });
+                    break;
+                    
+                case "none":
+                default:
+                    avoidanceDecision.decisions.push({
+                        type: 'highway_avoidance',
+                        action: 'no_avoidance',
+                        reason: 'No highway avoidance applied'
+                    });
+                    break;
+            }
         }
     }
     
